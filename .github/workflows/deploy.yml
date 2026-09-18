@@ -26,7 +26,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # enablement: true 會用 API 直接把 repo 的 Pages 打開（需要上面的 pages: write 權限），
+      # 省掉「到 Settings -> Pages 手動把 Source 設成 GitHub Actions」那一步。
       - uses: actions/configure-pages@v5
+        with:
+          enablement: true
 
       - uses: actions/upload-pages-artifact@v3
         with:
