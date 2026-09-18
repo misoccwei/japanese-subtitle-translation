@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>日文字幕語法拆解小工具</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%93%96%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="no-print">
+    <h1>日文字幕語法拆解小工具</h1>
+    <p class="subtitle">開啟字幕檔，點任何一句取得中文翻譯、單字拆解與文法說明</p>
+  </header>
+
+  <aside id="errorPanel" class="error-panel no-print" hidden>
+    <div class="error-panel-header">
+      <span>⚠️ 最新錯誤訊息</span>
+      <button type="button" id="errorPanelClose" class="error-panel-close" aria-label="關閉">×</button>
+    </div>
+    <p id="errorPanelTime" class="error-panel-time"></p>
+    <p id="errorPanelMessage" class="error-panel-message"></p>
+    <p id="errorPanelCountdown" class="error-panel-countdown"></p>
+  </aside>
+
+  <main>
+    <section id="apiKeyPanel" class="card no-print">
+      <h2>1. Gemini API Key</h2>
+
+      <p id="apiKeyStatus" class="status-text"></p>
+
+      <div class="field">
+        <label for="apiKeyInput">貼上你自己的 Gemini API Key</label>
+        <input
+          type="password"
+          id="apiKeyInput"
+          class="text-input"
+          placeholder="AIza..."
+          autocomplete="off"
+          autocapitalize="off"
+          spellcheck="false"
+        >
+      </div>
+
+      <div class="actions">
+        <button type="button" id="apiKeySaveBtn" class="btn btn-primary">儲存</button>
+        <button type="button" id="apiKeyToggleBtn" class="btn btn-secondary">顯示</button>
+        <button type="button" id="apiKeyClearBtn" class="btn btn-text">清除</button>
+      </div>
+
+      <p class="cache-hint">
+        到 <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">Google AI Studio</a> 免費申請。
+        Key 只存在這台瀏覽器的 <code>localStorage</code>，不會上傳到任何伺服器，請求也是瀏覽器直接打給 Google。
+        <strong>共用電腦請用完按「清除」。</strong>
+      </p>
+    </section>
+
+    <section id="workspacePanel" class="card no-print">
+      <h2>2. 工作資料夾</h2>
+
+      <p id="workspaceStatusText" class="status-text">正在檢查…</p>
+
+      <div class="actions">
+        <button type="button" id="pickDirBtn" class="btn btn-primary">選擇工作資料夾</button>
+        <button type="button" id="grantDirBtn" class="btn btn-primary" hidden>重新授權資料夾</button>
+        <button type="button" id="rescanBtn" class="btn btn-secondary" hidden>重新掃描</button>
+      </div>
+
+      <div class="file-upload" id="legacyUploadRow" hidden>
+        <label for="fileInput" class="btn btn-secondary file-upload-btn">選擇字幕檔</label>
+        <input type="file" id="fileInput" accept=".srt,.vtt,.ass,.ssa,.sbv,.txt" hidden>
+        <span id="fileNameDisplay" class="file-name">尚未選擇檔案</span>
+      </div>
+
+      <p class="cache-hint">
+        解說結果會寫進同一個資料夾的 <code>&lt;字幕檔名&gt;.notes.json</code>，下次開同一個檔案就不會再花 API 額度。
+        授權資料夾等於把裡面<strong>所有檔案的讀寫權</strong>交給這個頁面，
+        請指向專門放字幕的資料夾，不要選整個「文件」。
+      </p>
+
+      <ul id="fileList" class="file-list"></ul>
+    </section>
+
+    <section id="subtitlePanel" class="card no-print" hidden>
+      <h2 id="currentFileTitle">3. 字幕</h2>
+
+      <p id="notesBanner" class="notes-banner" hidden>
+        <span id="notesBannerText"></span>
+        <button type="button" id="notesRebuildBtn" class="btn btn-text">備份並重建</button>
+      </p>
+
+      <div class="meta-row">
+        <span id="progressText" class="meta-chip"></span>
+        <span id="usageText" class="meta-chip usage-text"></span>
+      </div>
+
+      <div class="actions">
+        <button type="button" id="downloadPdfBtn" class="btn btn-secondary">下載 PDF</button>
+        <button type="button" id="openImportDialogBtn" class="btn btn-text">匯入其他結果</button>
+        <button type="button" id="closeFileBtn" class="btn btn-text">回到檔案清單</button>
+      </div>
+
+      <details class="tools-details">
+        <summary>更多工具</summary>
+
+        <div class="field">
+          <label for="simplifiedOutput">精簡化後的字幕（純文字、無時間軸，可複製貼到其他工具）</label>
+          <textarea id="simplifiedOutput" rows="8" readonly></textarea>
+          <button type="button" id="copySimplifiedBtn" class="btn btn-secondary">一鍵複製</button>
+        </div>
+
+        <div class="actions">
+          <button type="button" id="clearCacheBtn" class="btn btn-text">清除全域快取</button>
+          <button type="button" id="importLegacyCacheBtn" class="btn btn-text">匯入舊版快取檔</button>
+          <button type="button" id="downloadNotesBtn" class="btn btn-text" hidden>下載 notes JSON</button>
+        </div>
+      </details>
+
+      <p id="statusText" class="status-text"></p>
+
+      <ol id="lineList" class="line-list"></ol>
+    </section>
+
+    <div id="printArea"></div>
+  </main>
+
+  <dialog id="noteDialog" class="note-dialog no-print">
+    <div class="note-dialog-inner">
+      <div class="note-dialog-head">
+        <span class="seq-badge" id="noteSeq"></span>
+        <button type="button" id="noteCloseBtn" class="error-panel-close" aria-label="關閉">×</button>
+      </div>
+      <p class="original-text" id="noteOriginal"></p>
+      <p id="noteCountdown" class="error-panel-countdown"></p>
+      <div id="noteBody" class="note-body"></div>
+      <div class="note-dialog-foot">
+        <button type="button" id="notePrevBtn" class="btn btn-secondary">← 上一句</button>
+        <button type="button" id="noteNextBtn" class="btn btn-secondary">下一句 →</button>
+        <button type="button" id="noteReanalyzeBtn" class="btn btn-text">重新分析這句</button>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="importDialog" class="import-dialog no-print">
+    <h2>匯入其他來源的分析結果</h2>
+    <p class="import-hint">
+      貼上 JSON。優先用每筆的 <code>id</code>（句子編號）對應，其次用 <code>text</code>（句子原文）對應；
+      如果兩者都沒有，才退回「陣列位置」對應，此時長度必須剛好等於目前句數（共 <strong id="importExpectedCount">0</strong> 句）。
+    </p>
+    <pre class="import-schema">{
+  "items": [
+    {
+      "id": 1,
+      "reading": "今日[きょう]はいい天気[てんき]ですね。",
+      "translation": "中文翻譯",
+      "words": [
+        { "word": "原字", "kana": "假名", "meaning": "中文意思", "note": "詞源/動詞變化/語感等解說" }
+      ],
+      "grammar": [
+        { "point": "文法點", "explanation": "接續與情境說明", "example": "例句" }
+      ]
+    }
+  ]
+}</pre>
+    <textarea id="importTextarea" rows="10" placeholder="在這裡貼上 JSON"></textarea>
+    <p id="importErrorText" class="import-error"></p>
+    <div class="import-actions">
+      <button type="button" id="importConfirmBtn" class="btn btn-primary">匯入</button>
+      <button type="button" id="importCancelBtn" class="btn btn-secondary">取消</button>
+    </div>
+  </dialog>
+
+  <script src="app.js"></script>
+</body>
+</html>

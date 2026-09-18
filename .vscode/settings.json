@@ -1,0 +1,9 @@
+{
+  // 這個檔案只有在「用 Live Server 開啟」時才有意義。雙擊 index.html 用 file:// 開啟不受影響。
+  //
+  // 資料夾授權、IndexedDB、localStorage 都是綁「來源 + 連接埠」的。
+  // Live Server 預設埠被佔用時會自動跳到 5501，一跳埠就會失去工作資料夾授權跟所有快取，
+  // 所以這裡把埠釘死。如果 5500 真的被別的程式佔用，請先關掉那個程式，不要改這個數字。
+  "liveServer.settings.port": 5500,
+  "liveServer.settings.host": "127.0.0.1"
+}

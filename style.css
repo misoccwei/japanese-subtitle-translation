@@ -1,0 +1,793 @@
+:root {
+  --bg: #f4f6f9;
+  --card-bg: #ffffff;
+  --text: #1f2937;
+  --text-muted: #6b7280;
+  --border: #e5e7eb;
+  --primary: #2563eb;
+  --primary-hover: #1d4ed8;
+  --secondary: #e5e7eb;
+  --secondary-text: #374151;
+  --accent: #0891b2;
+  --error-bg: #fef2f2;
+  --error-border: #fecaca;
+  --error-text: #b91c1c;
+  --radius: 12px;
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.06), 0 4px 12px rgba(0, 0, 0, 0.04);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 0 20px 60px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Hiragino Sans", "Noto Sans TC", "Noto Sans JP", "Segoe UI", system-ui, -apple-system, sans-serif;
+  line-height: 1.6;
+}
+
+header {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 40px 0 16px;
+  text-align: center;
+}
+
+header h1 {
+  margin: 0 0 8px;
+  font-size: 1.8rem;
+  font-weight: 700;
+}
+
+.subtitle {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.95rem;
+}
+
+main {
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+.card {
+  background: var(--card-bg);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 28px;
+  margin-bottom: 24px;
+}
+
+.card h2 {
+  margin-top: 0;
+  font-size: 1.2rem;
+  border-left: 4px solid var(--primary);
+  padding-left: 10px;
+}
+
+.field {
+  margin-bottom: 18px;
+}
+
+.field label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 6px;
+  font-size: 0.92rem;
+  color: var(--secondary-text);
+}
+
+.text-input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-family: "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 0.9rem;
+  color: var(--text);
+  background: #fafafa;
+}
+
+.text-input:focus {
+  outline: none;
+  border-color: var(--primary);
+  background: #fff;
+}
+
+.file-upload {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.file-upload-btn {
+  display: inline-block;
+}
+
+.file-name {
+  font-size: 0.88rem;
+  color: var(--text-muted);
+}
+
+.actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 20px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.actions .btn[hidden] {
+  display: none;
+}
+
+.btn {
+  border: none;
+  border-radius: 8px;
+  padding: 10px 22px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.15s ease, transform 0.05s ease;
+}
+
+.btn:active {
+  transform: translateY(1px);
+}
+
+.btn-primary {
+  background: var(--primary);
+  color: #fff;
+}
+
+.btn-primary:hover {
+  background: var(--primary-hover);
+}
+
+.btn-secondary {
+  background: var(--secondary);
+  color: var(--secondary-text);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: #d1d5db;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-text {
+  background: transparent;
+  color: var(--text-muted);
+  padding: 10px 6px;
+  text-decoration: underline;
+  font-weight: 500;
+}
+
+.btn-text:hover {
+  color: var(--error-text);
+}
+
+.status-text {
+  margin: 14px 0 0;
+  font-size: 0.9rem;
+  color: var(--accent);
+  min-height: 1.2em;
+}
+
+.cache-hint {
+  margin: 4px 0 0;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+.cache-hint code {
+  background: #f1f5f9;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-family: "SFMono-Regular", Menlo, Consolas, monospace;
+}
+
+/* ===== 字幕檔清單 ===== */
+.file-list {
+  list-style: none;
+  margin: 20px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.file-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background-color 0.12s ease, border-color 0.12s ease;
+}
+
+.file-row:hover {
+  background: #f8fafc;
+  border-color: var(--primary);
+}
+
+.file-row-name {
+  font-weight: 600;
+  font-size: 0.92rem;
+  word-break: break-all;
+}
+
+.file-row-progress {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.file-row-empty {
+  padding: 14px;
+  font-size: 0.88rem;
+  color: var(--text-muted);
+}
+
+/* ===== 字幕面板 ===== */
+.meta-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+
+.meta-chip {
+  font-size: 0.82rem;
+  color: var(--secondary-text);
+  background: #f1f5f9;
+  border-radius: 999px;
+  padding: 3px 12px;
+}
+
+.usage-text.usage-warn {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.usage-text.usage-danger {
+  background: var(--error-bg);
+  color: var(--error-text);
+  font-weight: 700;
+}
+
+.notes-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  background: #fef3c7;
+  border: 1px solid #fcd34d;
+  color: #92400e;
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 0.86rem;
+  margin: 0 0 12px;
+}
+
+.notes-banner[hidden] {
+  display: none;
+}
+
+.tools-details {
+  margin-top: 16px;
+  border-top: 1px dashed var(--border);
+  padding-top: 12px;
+}
+
+.tools-details summary {
+  cursor: pointer;
+  font-size: 0.88rem;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.tools-details > *:not(summary) {
+  margin-top: 14px;
+}
+
+/* ===== 字幕清單（點一列開解說彈窗）===== */
+.line-list {
+  list-style: none;
+  margin: 16px 0 0;
+  padding: 0;
+  border-top: 1px solid var(--border);
+}
+
+.line-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  transition: background-color 0.1s ease;
+}
+
+.line-row:hover {
+  background: #f8fafc;
+}
+
+.line-order {
+  flex: 0 0 auto;
+  min-width: 2.6em;
+  text-align: right;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  font-family: "SFMono-Regular", Menlo, Consolas, monospace;
+}
+
+/* 狀態點純靠 data-state 驅動，重畫一列 = 改一個 attribute */
+.line-dot {
+  flex: 0 0 auto;
+  width: 0.9em;
+  text-align: center;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.line-row[data-state="idle"] .line-dot::before { content: "○"; }
+.line-row[data-state="pending"] .line-dot::before { content: "◐"; color: var(--primary); }
+.line-row[data-state="done"] .line-dot::before { content: "●"; color: var(--accent); }
+.line-row[data-state="error"] .line-dot::before { content: "✕"; color: var(--error-text); }
+.line-row[data-state="skipped"] .line-dot::before { content: "–"; }
+
+.line-row[data-state="skipped"] {
+  opacity: 0.55;
+}
+
+.line-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.line-ja {
+  display: block;
+  font-size: 0.98rem;
+}
+
+.line-zh {
+  display: block;
+  font-size: 0.84rem;
+  color: var(--text-muted);
+}
+
+.line-zh:empty {
+  display: none;
+}
+
+/* ===== 解說彈窗 ===== */
+/* dialog 本身 padding 必須為 0，內容全放 .note-dialog-inner，
+   否則點在 dialog 自己的內距上會被當成點背景而誤關。 */
+.note-dialog {
+  padding: 0;
+  border: none;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  width: min(760px, calc(100vw - 32px));
+  max-height: calc(100vh - 64px);
+  background: var(--card-bg);
+  color: var(--text);
+}
+
+.note-dialog::backdrop {
+  background: rgba(15, 23, 42, 0.5);
+}
+
+.note-dialog-inner {
+  padding: 22px 26px 18px;
+}
+
+.note-dialog-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.note-dialog-head .seq-badge {
+  display: inline-block;
+  font-size: 0.78rem;
+  color: #fff;
+  background: var(--accent);
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-family: "SFMono-Regular", Menlo, Consolas, monospace;
+}
+
+.note-dialog .original-text {
+  font-size: 1.25rem;
+  font-weight: 700;
+  margin: 10px 0 14px;
+}
+
+.note-body .subtitle-card {
+  box-shadow: none;
+  padding: 0;
+  margin: 0;
+}
+
+.note-body .subtitle-card .seq-badge,
+.note-body .subtitle-card .original-text {
+  display: none;
+}
+
+.note-loading,
+.note-skipped,
+.note-error {
+  font-size: 0.92rem;
+  padding: 16px;
+  border-radius: 8px;
+  background: #f8fafc;
+  margin: 0 0 12px;
+}
+
+.note-error {
+  background: var(--error-bg);
+  color: var(--error-text);
+}
+
+.note-dialog-foot {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+#simplifiedOutput {
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-family: "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+  resize: vertical;
+  background: #fafafa;
+  color: var(--text);
+  margin-bottom: 10px;
+}
+
+/* 匯入結果的小視窗 */
+.import-dialog {
+  width: min(600px, calc(100vw - 40px));
+  border: none;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 24px 28px;
+}
+
+.import-dialog::backdrop {
+  background: rgba(15, 23, 42, 0.5);
+}
+
+.import-dialog h2 {
+  margin-top: 0;
+  font-size: 1.1rem;
+}
+
+.import-hint {
+  font-size: 0.88rem;
+  color: var(--secondary-text);
+  line-height: 1.6;
+}
+
+.import-schema {
+  background: #f1f5f9;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  font-size: 0.78rem;
+  overflow-x: auto;
+  margin: 0 0 14px;
+}
+
+#importTextarea {
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-family: "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+  resize: vertical;
+  background: #fafafa;
+  color: var(--text);
+}
+
+.import-error {
+  min-height: 1.2em;
+  font-size: 0.85rem;
+  color: var(--error-text);
+  margin: 10px 0 0;
+}
+
+.import-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+/* ===== 假名標注（ruby）===== */
+ruby {
+  ruby-position: over;
+  ruby-align: center;
+}
+
+rt {
+  font-size: 0.5em;
+  font-weight: 400;
+  color: var(--text-muted);
+  letter-spacing: 0;
+  user-select: none; /* 複製原句時不要把假名一起複製走 */
+}
+
+/* 有假名的行要留出上方空間，不然會被上一行壓到 */
+.original-text,
+.grammar-example,
+.grammar-point {
+  line-height: 2.2;
+}
+
+.word-table td {
+  line-height: 2.1;
+}
+
+.no-extra {
+  margin: 16px 0 0;
+  font-size: 0.88rem;
+  color: var(--text-muted);
+  background: #f8fafc;
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+
+/* Result cards */
+.subtitle-card {
+  background: var(--card-bg);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 24px 28px;
+  margin-bottom: 20px;
+  break-inside: avoid;
+}
+
+.subtitle-card .seq-badge {
+  display: inline-block;
+  font-size: 0.78rem;
+  color: #fff;
+  background: var(--accent);
+  padding: 2px 10px;
+  border-radius: 999px;
+  margin-bottom: 10px;
+  font-family: "SFMono-Regular", Menlo, Consolas, monospace;
+}
+
+.subtitle-card .original-text {
+  font-size: 1.25rem;
+  font-weight: 700;
+  margin: 0 0 14px;
+  color: var(--text);
+}
+
+.subtitle-card .translation {
+  font-size: 1rem;
+  color: var(--secondary-text);
+  background: #f8fafc;
+  border-left: 3px solid var(--primary);
+  padding: 10px 14px;
+  border-radius: 6px;
+  margin-bottom: 20px;
+}
+
+.subtitle-card h3 {
+  font-size: 0.95rem;
+  margin: 22px 0 10px;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+table.word-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+
+table.word-table th,
+table.word-table td {
+  border: 1px solid var(--border);
+  padding: 8px 12px;
+  text-align: left;
+  vertical-align: top;
+}
+
+table.word-table th {
+  background: #f1f5f9;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+table.word-table td:first-child {
+  white-space: nowrap;
+  font-weight: 600;
+  color: var(--primary);
+}
+
+table.word-table tr:nth-child(even) td {
+  background: #fafafa;
+}
+
+.grammar-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.grammar-list li {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  background: #fdfdfd;
+}
+
+.grammar-list .grammar-point {
+  font-weight: 700;
+  color: var(--accent);
+  margin-bottom: 4px;
+}
+
+.grammar-list .grammar-explanation {
+  font-size: 0.9rem;
+  margin-bottom: 6px;
+}
+
+.grammar-list .grammar-example {
+  font-size: 0.88rem;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* 右側浮動的最新錯誤訊息匡 */
+.error-panel {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  width: 320px;
+  max-width: calc(100vw - 40px);
+  background: var(--card-bg);
+  border: 1px solid var(--error-border);
+  border-left: 4px solid var(--error-text);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 14px 16px;
+  z-index: 1000;
+}
+
+.error-panel[hidden] {
+  display: none;
+}
+
+.error-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: 700;
+  font-size: 0.92rem;
+  color: var(--error-text);
+  margin-bottom: 6px;
+}
+
+.error-panel-close {
+  border: none;
+  background: none;
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--text-muted);
+  padding: 0 2px;
+}
+
+.error-panel-close:hover {
+  color: var(--error-text);
+}
+
+.error-panel-time {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin: 0 0 6px;
+}
+
+.error-panel-message {
+  font-size: 0.88rem;
+  color: var(--text);
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.error-panel-countdown {
+  margin: 8px 0 0;
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+@media (max-width: 900px) {
+  .error-panel {
+    position: static;
+    width: auto;
+    max-width: none;
+    margin: 0 auto 20px;
+    max-width: 900px;
+  }
+}
+
+@media (max-width: 640px) {
+  .card, .subtitle-card {
+    padding: 18px;
+  }
+  .actions {
+    flex-direction: column;
+  }
+}
+
+/* 解說改成彈窗之後，畫面上沒有卡片可印，所以列印區平常隱藏，
+   按下「下載 PDF」時才由 renderPrintArea() 即時建構，印完清空。 */
+#printArea {
+  display: none;
+}
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  /* modal dialog 在 top layer，會蓋著整頁印出來；JS 已經先 close()，這是第二道保險 */
+  dialog[open] {
+    display: none !important;
+  }
+  body {
+    background: #fff;
+    padding: 0;
+  }
+  main {
+    max-width: none;
+  }
+  #printArea {
+    display: block;
+  }
+  #printArea > h1 {
+    font-size: 1.2rem;
+    margin: 0 0 16px;
+  }
+  .subtitle-card {
+    box-shadow: none;
+    border: 1px solid #ddd;
+    page-break-inside: avoid;
+  }
+}

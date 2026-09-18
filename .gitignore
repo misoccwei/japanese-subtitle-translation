@@ -1,0 +1,19 @@
+# 字幕與解說結果（屬於個人資料，不進版控）
+*.srt
+*.vtt
+*.ass
+*.ssa
+*.sbv
+*.notes.json
+_jst-global-cache.json
+
+# 本機設定
+.claude/settings.local.json
+
+# 作業系統
+.DS_Store
+Thumbs.db
+
+# 編輯器
+*.swp
+.idea/
