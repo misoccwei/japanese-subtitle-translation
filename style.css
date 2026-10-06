@@ -97,20 +97,8 @@ main {
   background: #fff;
 }
 
-.file-upload {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  flex-wrap: wrap;
-}
-
-.file-upload-btn {
-  display: inline-block;
-}
-
-.file-name {
-  font-size: 0.88rem;
-  color: var(--text-muted);
+.status-text[hidden] {
+  display: none;
 }
 
 .actions {
@@ -160,6 +148,11 @@ main {
 .btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.btn-small {
+  padding: 5px 12px;
+  font-size: 0.85rem;
 }
 
 .btn-text {
@@ -239,51 +232,6 @@ main {
   color: var(--text-muted);
 }
 
-/* ===== 字幕面板 ===== */
-.meta-row {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-  margin-top: 6px;
-}
-
-.meta-chip {
-  font-size: 0.82rem;
-  color: var(--secondary-text);
-  background: #f1f5f9;
-  border-radius: 999px;
-  padding: 3px 12px;
-}
-
-.usage-text.usage-warn {
-  background: #fef3c7;
-  color: #92400e;
-}
-
-.usage-text.usage-danger {
-  background: var(--error-bg);
-  color: var(--error-text);
-  font-weight: 700;
-}
-
-.notes-banner {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-  background: #fef3c7;
-  border: 1px solid #fcd34d;
-  color: #92400e;
-  border-radius: 8px;
-  padding: 10px 14px;
-  font-size: 0.86rem;
-  margin: 0 0 12px;
-}
-
-.notes-banner[hidden] {
-  display: none;
-}
-
 .tools-details {
   margin-top: 16px;
   border-top: 1px dashed var(--border);
@@ -301,7 +249,30 @@ main {
   margin-top: 14px;
 }
 
-/* ===== 字幕清單（點一列開解說彈窗）===== */
+/* ===== kitsunekko 匯入 ===== */
+.kitsu-steps {
+  margin: 0 0 10px;
+  padding-left: 1.4em;
+  font-size: 0.92rem;
+}
+
+.kitsu-steps li {
+  margin-bottom: 6px;
+}
+
+/* 書籤小工具：要用拖的，所以做成像一顆按鈕但游標是「可抓取」 */
+.bookmarklet {
+  display: inline-block;
+  padding: 3px 12px;
+  border: 1px dashed var(--primary);
+  border-radius: 999px;
+  color: var(--primary);
+  font-weight: 600;
+  text-decoration: none;
+  cursor: grab;
+}
+
+/* ===== 字幕清單（每列：序號、台詞、📋、Gemini）===== */
 .line-list {
   list-style: none;
   margin: 16px 0 0;
@@ -315,7 +286,6 @@ main {
   gap: 10px;
   padding: 8px 10px;
   border-bottom: 1px solid var(--border);
-  cursor: pointer;
   transition: background-color 0.1s ease;
 }
 
@@ -332,462 +302,195 @@ main {
   font-family: "SFMono-Regular", Menlo, Consolas, monospace;
 }
 
-/* 狀態點純靠 data-state 驅動，重畫一列 = 改一個 attribute */
-.line-dot {
-  flex: 0 0 auto;
-  width: 0.9em;
-  text-align: center;
-  font-size: 0.8rem;
-  color: var(--text-muted);
-}
-
-.line-row[data-state="idle"] .line-dot::before { content: "○"; }
-.line-row[data-state="pending"] .line-dot::before { content: "◐"; color: var(--primary); }
-.line-row[data-state="done"] .line-dot::before { content: "●"; color: var(--accent); }
-.line-row[data-state="error"] .line-dot::before { content: "✕"; color: var(--error-text); }
-.line-row[data-state="skipped"] .line-dot::before { content: "–"; }
-
-.line-row[data-state="skipped"] {
-  opacity: 0.55;
-}
-
-.line-text {
+.line-ja {
   flex: 1 1 auto;
   min-width: 0;
-}
-
-.line-ja {
-  display: block;
   font-size: 0.98rem;
+  overflow-wrap: anywhere;
 }
 
-.line-zh {
-  display: block;
-  font-size: 0.84rem;
+/* 音效、符號這類句子（shouldSkipLine）淡化，按鈕照樣能用 */
+.line-row.is-minor .line-ja {
   color: var(--text-muted);
 }
 
-.line-zh:empty {
-  display: none;
-}
-
-/* ===== 解說彈窗 ===== */
-/* dialog 本身 padding 必須為 0，內容全放 .note-dialog-inner，
-   否則點在 dialog 自己的內距上會被當成點背景而誤關。 */
-.note-dialog {
-  padding: 0;
-  border: none;
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
-  width: min(760px, calc(100vw - 32px));
-  max-height: calc(100vh - 64px);
-  background: var(--card-bg);
-  color: var(--text);
-}
-
-.note-dialog::backdrop {
-  background: rgba(15, 23, 42, 0.5);
-}
-
-.note-dialog-inner {
-  padding: 22px 26px 18px;
-}
-
-.note-dialog-head {
+/* 每列右邊的動作鈕（複製、Gemini）：桌機平常淡淡的、滑到那一列才清楚；
+   觸控裝置沒有 hover，所以常駐，並放大到手指點得到的尺寸 */
+.line-actions {
+  flex: 0 0 auto;
+  align-self: center;
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  gap: 4px;
 }
 
-.note-dialog-head .seq-badge {
-  display: inline-block;
-  font-size: 0.78rem;
-  color: #fff;
-  background: var(--accent);
-  padding: 2px 10px;
-  border-radius: 999px;
-  font-family: "SFMono-Regular", Menlo, Consolas, monospace;
-}
-
-.note-dialog .original-text {
-  font-size: 1.25rem;
-  font-weight: 700;
-  margin: 10px 0 14px;
-}
-
-.note-body .subtitle-card {
-  box-shadow: none;
-  padding: 0;
-  margin: 0;
-}
-
-.note-body .subtitle-card .seq-badge,
-.note-body .subtitle-card .original-text {
-  display: none;
-}
-
-.note-loading,
-.note-skipped,
-.note-error {
-  font-size: 0.92rem;
-  padding: 16px;
-  border-radius: 8px;
-  background: #f8fafc;
-  margin: 0 0 12px;
-}
-
-.note-error {
-  background: var(--error-bg);
-  color: var(--error-text);
-}
-
-.note-dialog-foot {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-  align-items: center;
-  margin-top: 18px;
-  padding-top: 14px;
-  border-top: 1px solid var(--border);
-}
-
-#simplifiedOutput {
-  width: 100%;
-  padding: 12px 14px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  font-family: "SFMono-Regular", Menlo, Consolas, monospace;
-  font-size: 0.85rem;
-  resize: vertical;
-  background: #fafafa;
-  color: var(--text);
-  margin-bottom: 10px;
-}
-
-/* 匯入結果的小視窗 */
-.import-dialog {
-  width: min(600px, calc(100vw - 40px));
+.line-copy,
+.line-gemini {
   border: none;
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
-  padding: 24px 28px;
-}
-
-.import-dialog::backdrop {
-  background: rgba(15, 23, 42, 0.5);
-}
-
-.import-dialog h2 {
-  margin-top: 0;
-  font-size: 1.1rem;
-}
-
-.import-hint {
-  font-size: 0.88rem;
-  color: var(--secondary-text);
-  line-height: 1.6;
-}
-
-.import-schema {
-  background: #f1f5f9;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 12px 14px;
-  font-size: 0.78rem;
-  overflow-x: auto;
-  margin: 0 0 14px;
-}
-
-#importTextarea {
-  width: 100%;
-  padding: 12px 14px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  font-family: "SFMono-Regular", Menlo, Consolas, monospace;
-  font-size: 0.85rem;
-  resize: vertical;
-  background: #fafafa;
-  color: var(--text);
-}
-
-.import-error {
-  min-height: 1.2em;
-  font-size: 0.85rem;
-  color: var(--error-text);
-  margin: 10px 0 0;
-}
-
-.import-actions {
-  display: flex;
-  gap: 12px;
-  margin-top: 16px;
-}
-
-/* ===== 假名標注（ruby）===== */
-ruby {
-  ruby-position: over;
-  ruby-align: center;
-}
-
-rt {
-  font-size: 0.5em;
-  font-weight: 400;
-  color: var(--text-muted);
-  letter-spacing: 0;
-  user-select: none; /* 複製原句時不要把假名一起複製走 */
-}
-
-/* 有假名的行要留出上方空間，不然會被上一行壓到 */
-.original-text,
-.grammar-example,
-.grammar-point {
-  line-height: 2.2;
-}
-
-.word-table td {
-  line-height: 2.1;
-}
-
-.no-extra {
-  margin: 16px 0 0;
-  font-size: 0.88rem;
-  color: var(--text-muted);
-  background: #f8fafc;
-  border-radius: 8px;
-  padding: 12px 14px;
-}
-
-/* Result cards */
-.subtitle-card {
-  background: var(--card-bg);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
-  padding: 24px 28px;
-  margin-bottom: 20px;
-  break-inside: avoid;
-}
-
-.subtitle-card .seq-badge {
-  display: inline-block;
-  font-size: 0.78rem;
-  color: #fff;
-  background: var(--accent);
-  padding: 2px 10px;
-  border-radius: 999px;
-  margin-bottom: 10px;
-  font-family: "SFMono-Regular", Menlo, Consolas, monospace;
-}
-
-.subtitle-card .original-text {
-  font-size: 1.25rem;
-  font-weight: 700;
-  margin: 0 0 14px;
-  color: var(--text);
-}
-
-.subtitle-card .translation {
-  font-size: 1rem;
-  color: var(--secondary-text);
-  background: #f8fafc;
-  border-left: 3px solid var(--primary);
-  padding: 10px 14px;
   border-radius: 6px;
-  margin-bottom: 20px;
-}
-
-.subtitle-card h3 {
-  font-size: 0.95rem;
-  margin: 22px 0 10px;
-  color: var(--text);
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.table-wrap {
-  overflow-x: auto;
-}
-
-table.word-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 0.88rem;
-}
-
-table.word-table th,
-table.word-table td {
-  border: 1px solid var(--border);
-  padding: 8px 12px;
-  text-align: left;
-  vertical-align: top;
-}
-
-table.word-table th {
-  background: #f1f5f9;
-  font-weight: 600;
-  white-space: nowrap;
-}
-
-table.word-table td:first-child {
-  white-space: nowrap;
-  font-weight: 600;
-  color: var(--primary);
-}
-
-table.word-table tr:nth-child(even) td {
-  background: #fafafa;
-}
-
-.grammar-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.grammar-list li {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 12px 14px;
-  background: #fdfdfd;
-}
-
-.grammar-list .grammar-point {
-  font-weight: 700;
-  color: var(--accent);
-  margin-bottom: 4px;
-}
-
-.grammar-list .grammar-explanation {
-  font-size: 0.9rem;
-  margin-bottom: 6px;
-}
-
-.grammar-list .grammar-example {
-  font-size: 0.88rem;
-  color: var(--text-muted);
-  font-style: italic;
-}
-
-/* 右側浮動的最新錯誤訊息匡 */
-.error-panel {
-  position: fixed;
-  top: 20px;
-  right: 20px;
-  width: 320px;
-  max-width: calc(100vw - 40px);
-  background: var(--card-bg);
-  border: 1px solid var(--error-border);
-  border-left: 4px solid var(--error-text);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
-  padding: 14px 16px;
-  z-index: 1000;
-}
-
-.error-panel[hidden] {
-  display: none;
-}
-
-.error-panel-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  font-weight: 700;
-  font-size: 0.92rem;
-  color: var(--error-text);
-  margin-bottom: 6px;
-}
-
-.error-panel-close {
-  border: none;
-  background: none;
-  font-size: 1.2rem;
   line-height: 1;
   cursor: pointer;
-  color: var(--text-muted);
-  padding: 0 2px;
+  transition: opacity 0.1s ease, background-color 0.1s ease;
 }
 
-.error-panel-close:hover {
-  color: var(--error-text);
+.line-copy {
+  background: transparent;
+  padding: 4px 6px;
+  font-size: 0.9rem;
+  opacity: 0.3;
 }
 
-.error-panel-time {
-  font-size: 0.75rem;
-  color: var(--text-muted);
-  margin: 0 0 6px;
+.line-gemini {
+  background: var(--secondary);
+  color: var(--secondary-text);
+  padding: 5px 9px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  opacity: 0.45;
 }
 
-.error-panel-message {
-  font-size: 0.88rem;
-  color: var(--text);
-  margin: 0;
-  white-space: pre-wrap;
-  word-break: break-word;
-  max-height: 200px;
-  overflow-y: auto;
+.line-row:hover .line-copy,
+.line-row:hover .line-gemini,
+.line-copy:focus-visible,
+.line-gemini:focus-visible {
+  opacity: 1;
 }
 
-.error-panel-countdown {
-  margin: 8px 0 0;
-  font-size: 0.88rem;
-  font-weight: 700;
-  color: var(--accent);
+.line-copy:hover {
+  background: var(--secondary);
 }
 
-@media (max-width: 900px) {
-  .error-panel {
-    position: static;
-    width: auto;
-    max-width: none;
-    margin: 0 auto 20px;
-    max-width: 900px;
+.line-gemini:hover {
+  background: var(--primary);
+  color: #fff;
+}
+
+@media (hover: none) {
+  .line-copy,
+  .line-gemini {
+    opacity: 1;
+    min-height: 36px;
+  }
+
+  .line-copy {
+    min-width: 36px;
+    font-size: 1rem;
   }
 }
 
 @media (max-width: 640px) {
-  .card, .subtitle-card {
-    padding: 18px;
+  body {
+    padding: 0 12px 60px;
   }
-  .actions {
-    flex-direction: column;
+  .card {
+    padding: 18px 14px;
   }
 }
 
-/* 解說改成彈窗之後，畫面上沒有卡片可印，所以列印區平常隱藏，
-   按下「下載 PDF」時才由 renderPrintArea() 即時建構，印完清空。 */
-#printArea {
+/* ===== 找字幕（Jimaku）===== */
+.search-row {
+  display: flex;
+  gap: 8px;
+  margin: 14px 0 10px;
+}
+
+.search-row .text-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.search-row .btn {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.find-row {
+  align-items: center;
+  gap: 12px;
+}
+
+.find-row-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.find-row-main .file-row-name {
+  overflow-wrap: anywhere;
+}
+
+.find-row-sub {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.find-row .file-row-progress {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.find-row.is-disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.find-row.is-disabled:hover {
+  background: var(--card-bg);
+}
+
+#findBackBtn[hidden] {
   display: none;
 }
 
-@media print {
-  .no-print {
-    display: none !important;
-  }
-  /* modal dialog 在 top layer，會蓋著整頁印出來；JS 已經先 close()，這是第二道保險 */
-  dialog[open] {
-    display: none !important;
-  }
-  body {
-    background: #fff;
-    padding: 0;
-  }
-  main {
-    max-width: none;
-  }
-  #printArea {
-    display: block;
-  }
-  #printArea > h1 {
-    font-size: 1.2rem;
-    margin: 0 0 16px;
-  }
-  .subtitle-card {
-    box-shadow: none;
-    border: 1px solid #ddd;
-    page-break-inside: avoid;
-  }
+/* ===== 底部提示（Gemini 提示詞已複製等）===== */
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  z-index: 1000;
+  width: max-content;
+  max-width: calc(100vw - 32px);
+  padding: 12px 18px;
+  border-radius: 10px;
+  background: #1f2937;
+  color: #fff;
+  font-size: 0.92rem;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+}
+
+.toast[hidden] {
+  display: none;
+}
+
+/* iOS Safari 遇到小於 16px 的輸入框會自動放大畫面，搜尋框要用 16px */
+.search-row .text-input {
+  font-family: inherit;
+  font-size: 16px;
+}
+
+/* ===== Gemini 開啟方式 ===== */
+.gemini-mode {
+  margin-bottom: 8px;
+}
+
+.mode-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 10px;
+  font-size: 0.92rem;
+  cursor: pointer;
+}
+
+.mode-option input[type="radio"] {
+  margin-top: 4px;
+  flex: 0 0 auto;
+}
+
+.mode-option .text-input {
+  margin-top: 6px;
+  font-family: inherit;
+  font-size: 16px; /* iOS 小於 16px 會自動放大畫面 */
 }

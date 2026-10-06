@@ -2,22 +2,26 @@
 
 這份文件記錄這個小工具的設計決策與原因，之後要修改功能時可以先看這份文件，不用重新跟 AI 從頭解釋需求。
 
-## 專案目的
+## 專案目的（2026-10 起的現況，見 §26）
 
-選一個工作資料夾 → 點裡面的日文字幕檔（支援 `.srt` / `.vtt` / `.ass` / `.ssa` / `.sbv` / `.txt`）→ 自動拆解成逐句台詞（只保留文字與順序，不留時間軸）→ **點哪一句才解說哪一句**，呼叫 Gemini API 做「中文翻譯 + N3 以上單字/動詞拆解 + 文法說明」→ 以彈出視窗呈現 → 解說紀錄寫進同資料夾的 `<字幕檔名>.notes.json` → 可用瀏覽器列印功能把所有已解說的句子另存為 PDF。
+從 Jimaku／kitsunekko 拿日文字幕（支援 `.srt` / `.vtt` / `.ass` / `.ssa` / `.sbv` / `.txt`，以及裝這些檔案的 `.zip`）→ 拆成逐句台詞（只保留文字與順序，不留時間軸）→ 每句右邊兩顆按鈕：**📋 複製這句**、**Gemini**（複製解說提示詞並打開 Gemini，解說直接在 Gemini 看）。
 
-純前端（HTML + CSS + 原生 JS），無框架、無建置流程，**雙擊 `index.html`、用 VS Code Live Server、或部署成 GitHub Pages 都可以**（細節與實測結果見 §14、§21）。
+**不呼叫任何 AI API、不讀寫本機檔案**：字幕只放在記憶體裡，重新整理就要再拿一次。唯一存在瀏覽器的是 Jimaku API key。
+
+純前端（HTML + CSS + 原生 JS），無框架、無建置流程，用 VS Code Live Server 或部署成 GitHub Pages 都可以（§21）。
+
+> §1–§20、§23 的大部分內容（Gemini API、批次與重試、notes 檔、工作資料夾、解說彈窗、PDF 列印、匯入結果）已經在 §26 整個拿掉，留著當作歷史紀錄：之後如果想把哪個功能加回來，可以先看當初為什麼那樣設計。
 
 ## 檔案結構
 
-- `index.html` — 頁面結構：工作資料夾面板、字幕清單 `#lineList`、解說彈窗 `#noteDialog`、列印區 `#printArea`
-- `style.css` — 卡片式 UI 樣式，含 `@media print` 專用列印樣式
-- `app.js` — 所有邏輯：資料夾存取、notes 檔讀寫、字幕解析、Gemini 呼叫、清單/彈窗渲染、PDF 列印
-- `.vscode/settings.json` — 只有在用 Live Server 時才需要，把埠釘死在 5500（原因見 §14）
+- `index.html` — 頁面結構：「找字幕」卡片 `#findPanel`（Jimaku 搜尋 + kitsunekko 書籤）、字幕清單 `#subtitlePanel` / `#lineList`、底部提示 `#toast`
+- `style.css` — 卡片式 UI 樣式
+- `app.js` — 所有邏輯：Jimaku 搜尋與下載、kitsunekko 書籤接收、zip 解壓與編碼判斷、字幕解析、清單渲染、複製、Gemini 提示詞
+- `.vscode/settings.json` — Live Server 埠釘在 5500（§14；現在只剩 Jimaku key 綁在 origin 上）
 - `DESIGN.md` — 本文件（設計決策與原因）
 - `README.md` — 給 repo 讀者看的使用/部署說明
 - `.github/workflows/deploy.yml` — GitHub Pages 部署（見 §21）
-- `.gitignore` — 擋掉字幕檔與 `*.notes.json`（都是個人資料，不進版控）
+- `.gitignore` — 擋掉字幕檔與 `*.notes.json`（舊版留下的個人資料，不進版控）
 
 ## 核心設計決策
 
@@ -387,12 +391,126 @@ Prompt（`buildPrompt()`）明確要求：
 
 **`.gitignore` 擋掉字幕檔**：`*.srt` / `*.vtt` / `*.notes.json` 這些都是使用者的個人內容（可能還有版權問題），預設不進版控。要放測試用字幕的話用 `git add -f` 明確加。
 
+### 22. 從 kitsunekko 抓字幕：書籤小工具 + postMessage（不是直接 fetch）
+
+**需求**：直接從 [kitsunekko](https://kitsunekko.net/dirlist.php?dir=subtitles%2Fjapanese%2F) 挑字幕，不用自己下載再放進資料夾。
+
+**為什麼不能直接 fetch**（2026-10 實測）：
+- kitsunekko 沒有回 `Access-Control-Allow-Origin`，瀏覽器會擋下跨站讀取
+- 公開 CORS 代理全部失敗：corsproxy.io 要 API key；allorigins、codetabs、cors.eu.org、thingproxy 都被 kitsunekko 回 **403**。同一個網址從一般家用網路 curl（任何 User-Agent）都是 200，所以它擋的是**機房 IP**，不是 UA。自己架 Cloudflare Worker 之類的代理很可能一樣被擋，而且會讓專案多一個後端
+- 結論：請求只能從**使用者自己的瀏覽器、在 kitsunekko 的 origin 上**發出
+
+**現在的做法**（`// ===== kitsunekko 匯入 =====` 區塊）：
+1. 「開啟 kitsunekko」用 `window.open(url, "jst-kitsunekko")` 開分頁，**不加 noopener**，讓那個分頁保有 `window.opener`（kitsunekko 沒送 COOP header，跨站換頁後 opener 仍在，已實測）
+2. 書籤小工具的原始碼就是 `kitsunekkoBookmarklet()` 這個函式，用 `toString()` 塞進 `javascript:` 網址。它跑在 kitsunekko 頁面上，所以**不能引用 app.js 的任何東西**（20 MB 上限因此是寫死的數字，要跟 `KITSUNEKKO_MAX_BYTES` 手動保持一致）
+3. 書籤在每個檔案連結旁加按鈕；按下去在 kitsunekko 同源 `fetch` 檔案 → `postMessage({type:"jst-kitsunekko-file", id, name, data}, "*", [data])` 給 opener
+4. 這頁只收 `event.origin` 符合 `KITSUNEKKO_ORIGIN_RE` 的訊息，處理完回 `jst-kitsunekko-ack`，書籤把結果顯示在按鈕上
+5. targetOrigin 用 `"*"`：書籤不知道 app 在哪個 origin（本機 / GitHub Pages / file://），而送出去的只是公開的字幕檔，沒有洩漏疑慮
+
+**收到檔案之後**：
+- 字幕檔 → `decodeSubtitleBytes()` 判斷編碼（BOM → 嚴格 UTF-8 → Shift_JIS）→ 存進工作資料夾 → 重新掃描 → 直接開啟
+- `.zip` → `extractSubtitlesFromZip()` 自己讀 zip 目錄、用內建 `DecompressionStream("deflate-raw")` 解壓，**沒有外部套件**。只支援 stored / deflate、無加密、非 zip64（kitsunekko 上的 zip 都是這種）。檔名沒標 UTF-8 時當 Shift_JIS 解
+- `.rar` / `.7z` → 明確拒絕。瀏覽器沒有內建解法，要支援就得引入 wasm 解壓套件，不划算
+- 同名檔已存在：內容相同就沿用（notes 才接得上），不同就另存 `名稱 (2).srt`，**絕不覆蓋**
+- 沒有工作資料夾（手機、平板、非 Chromium）：只載入記憶體，跟「選擇字幕檔」一樣；zip 裡有好幾集時不替使用者決定，在「找字幕」卡片列出來讓他挑（`showArchiveChooser()`）
+- 多個訊息排進 `enqueueImport()` 依序處理（跟 Jimaku 下載共用），避免連按時兩個檔案搶同一個檔名
+- 書籤的說明放在「找字幕」卡片最下面的摺疊區：它只在電腦上好用，手機改走 Jimaku（§24）
+
+**書籤端的保護**：不在 kitsunekko、找不到 opener、頁面上沒有檔案都會 alert 說明；重複按書籤不會長出第二排按鈕；超過 20 MB 的檔案（根目錄有好幾個數百 MB 的整包封存檔）按鈕直接停用，不會先下載完才被拒；20 秒沒收到回應就提示「分頁還開著嗎」。
+
+**代價**：使用者要先把書籤拖到書籤列一次，而且 kitsunekko 每換一頁都要再按一次書籤（書籤只活在當下那一頁）。換來的是不需要任何伺服器，線上版、本機版、`file://` 都能用。
+
+**順便修的**：
+- Netflix 來源的字幕每句都包著看不見的方向控制字元（U+202A…U+202C），會被一起複製、送給 Gemini、當成快取 key。現在 `parseSubtitleFile()` 會先用 `BIDI_CONTROL_RE` 清掉。副作用：**這類檔案之前存的 notes 會因為原文不同而對不上**，要重新解說（其他來源的檔案不受影響）
+- 從資料夾開檔、「選擇字幕檔」也改走 `decodeSubtitleBytes()`，Shift_JIS / UTF-16 的檔案不再是亂碼
+- `.file-upload { display: flex }` 會蓋掉 `hidden` 屬性，導致資料夾模式下也看得到「選擇字幕檔」。補了 `[hidden] { display: none }`
+
+### 23. 複製單句到剪貼簿
+
+- 清單每一列右邊有 📋 鈕與「Gemini」鈕（`.line-actions`；桌機平常淡化、滑過才清楚；觸控裝置沒有 hover，所以常駐並放大到 36px 好點），彈窗標題列有「📋 複製原句」「Gemini 解說」
+- 列上的按鈕要在 `lineListEl` 的 click handler 裡**先判斷再 return**，不然點按鈕會順便打開彈窗
+- 複製的是原始字幕文字（`currentSubtitles[i].text`），不是帶假名標記的 `reading`，貼到其他地方才乾淨
+- `copyText()`：先試 `navigator.clipboard.writeText`，失敗才退回 `execCommand("copy")`。暫存的 textarea 要掛在**按鈕所在的 dialog 裡**：modal dialog 開著時 body 其他地方是 inert，掛在 body 上選不到（已實測退路在 modal 內可用）
+- `copyWithFeedback()` 用 WeakMap 記住每顆按鈕的計時器與原本文字，連點時不會把「已複製！」誤當成原本的字存起來。「精簡化字幕」的一鍵複製也改用它
+
+### 24. 在頁面裡直接搜尋 Jimaku（手機、平板也能用）
+
+**需求**：從 kitsunekko 或 [Jimaku](https://jimaku.cc/) 拿字幕，最好在這個頁面裡就能挑，不要跳出去再跳回來，而且手機平板也要能用。
+
+**查證結果（2026-10）**：
+- kitsunekko 頁面內瀏覽做不到（§22：沒有 CORS、擋機房 IP），書籤小工具在手機上又幾乎不能用
+- Jimaku 的 API（`https://jimaku.cc/api`，規格在 `/api/openapi.json`）有開 CORS（會回應請求的 origin，`authorization`、`x-client-id` 都在允許的 header 裡），**可以直接從瀏覽器呼叫**；但需要 API key（免費註冊、在 Account 頁產生），放在 `Authorization` header
+- Jimaku 的**下載網址** CORS 是 `*`，而且不用 key
+- Jimaku 的一般 HTML 頁面沒有 CORS，所以不能用爬網頁的方式繞過 key
+- kitsunekko 的字幕大多也在 Jimaku 裡（作品標「External」，例如 kitsunekko 上的 `3-gatsu no Lion 001.srt` 在 Jimaku 的同名作品裡也有），所以手機上走 Jimaku 就能拿到 kitsunekko 的內容
+
+**流程**（`// ===== Jimaku 搜尋 =====`）：搜尋 `GET /entries/search?query=` → 點作品 `GET /entries/{id}/files` → 點檔案直接 `fetch(file.url)` → 走跟 kitsunekko 同一個 `importDownloadedSubtitle()`（zip 解壓、編碼判斷、有工作資料夾就存檔）。
+- 請求帶 `X-Client-Id: japanese-subtitle-translation`：Jimaku 文件要求帶 User-Agent 或 X-Client-Id，而 fetch 改不了 User-Agent
+- 401 / 429 都翻成人話（429 是 Jimaku 以 IP 計算的速率限制）
+- `.rar` / `.7z`、超過 20 MB 的檔案直接停用，不讓使用者白等下載
+- 卡片的狀態只有三層（搜尋結果 → 作品檔案 → zip 內容），用 `findView` 一個物件記錄，返回鈕往上退一層
+- 沒設 key 時 key 區塊自動展開（手機上很難發現要先填這個）；搜尋框字級 16px，避免 iOS Safari 一點就放大畫面
+
+### 25. 每句旁邊的「Gemini」：交給 Gemini 網頁版解說
+
+**需求**：手機平板上點一下就到 Gemini 網頁版，解說直接看 Gemini 的回答。
+
+**限制**：Gemini 網頁版**沒有**「網址帶入提示詞」的功能（`?q=` 只有第三方的桌機 Chrome 擴充功能做得到，手機裝不了）。所以做不到真正的「點一下就送出」，退而求其次：
+1. 按鈕把整段提示詞（這句 + 最近的前後各一句當語境 + 要求的解說格式）複製到剪貼簿
+2. 同時開 `https://gemini.google.com/app`（手機上有裝 Gemini App 的話，系統可能直接用 App 開）
+3. 使用者在輸入框貼上、送出，解說就在 Gemini 裡看，不回傳到這個頁面
+
+**實作重點**（`askGemini()`）：
+- `copyText()` 要在 `window.open()` **之前開始**：開新分頁後這頁會失去焦點，剪貼簿 API 會拒絕；兩件事都必須在點擊的同步流程裡發生，iOS Safari 才不會擋新分頁
+- 開出去的分頁設 `opener = null`，不讓對方頁面拿到這個分頁
+- 前後文用 `nearbyLine()` 往前／往後找最近的「不會被跳過」的台詞（跳過 ♪～ 這類），最多看 3 句
+- 結果用底部提示（`#toast`）告訴使用者下一步；複製失敗、新分頁被擋都有各自的說明
+- 點台詞本身仍然是原本的 API 解說彈窗（§18），兩條路並存：有 API key 就在頁面裡看，沒有就丟 Gemini 網頁版
+
+**考慮過但沒做**：Gemini API 改用 Google 帳號 OAuth 登入（要自己在 Google Cloud 建 OAuth 用戶端、純前端拿到的 token 約一小時就過期，而且用量算在建用戶端的那個專案）；把 ChatGPT／Gemini 網頁版的回覆貼回這裡存成 notes。需求改成「解說直接看 Gemini」之後兩者都不需要了。
+
+### 26. 拿掉 Gemini API 與本機檔案：只剩「拿字幕 → 複製／丟 Gemini」（**推翻 §1–§20 的主流程**）
+
+**需求**：把 Gemini API 的部分全部拔掉；不存字幕、也不讀本機字幕，每次都去 jimaku.cc 或 kitsunekko.net 拿（放記憶體可以）；解說交給 Gemini（電腦版不能帶參數就複製再開分頁，手機版盡量直接開 Gemini App），盡量一鍵完成。
+
+**拿掉的東西**：API Key 面板與所有 Gemini API 呼叫（批次、預抓、重試、429 冷卻、用量計數、右側錯誤欄）、解說彈窗與結果卡片（含假名標注）、notes 檔與全域快取、工作資料夾（File System Access）與 IndexedDB、「選擇字幕檔」、匯入外部結果、PDF 列印、精簡化字幕工具。`app.js` 從約 2,600 行降到約 850 行。
+
+**留下的東西**：Jimaku 搜尋（§24）、kitsunekko 書籤（§22）、zip 解壓與編碼判斷、各格式字幕解析（§7）、每句的 📋 與 Gemini 按鈕（§23、§25）。
+- 下載回來的字幕只進 `currentSubtitles`；zip 裡有好幾集就在「找字幕」卡片列出來挑（`showArchiveChooser()`）
+- `shouldSkipLine()` 留著，只用來把 ♪～ 這類句子淡化、以及替 Gemini 提示詞找前後文
+- `.ass` 解析補強（實測 Jimaku 上一個字幕組的 .ass：3,075 行 Dialogue 裡只有約 440 行是台詞）：`{\p1}` 之後是向量圖形座標，整行跳過；同一時間點的重複（多圖層）與跟上一句一模一樣的連續重複（逐格動畫的招牌字）只留一份；隔很遠的同一句台詞照樣保留
+- localStorage 只剩 Jimaku API key（`jst_jimaku_key_v1`）與 Gemini 開啟方式的設定（§27）；舊版留在瀏覽器裡的 `jst_api_key_v1` 等資料不會再被讀取
+
+**手機上「直接開 Gemini App 並帶入文字」做不到**（2026-10 查證）：
+- Gemini 網頁版沒有官方的網址參數可以帶入提示詞（`?q=` 只有第三方桌機擴充功能支援）
+- Gemini App 沒有公開的 deep link／URL scheme 可以帶文字
+- Android 的分享選單只能把圖片、檔案分享給 Gemini，不能分享文字；iOS 的 Gemini App 沒有分享擴充功能
+
+所以電腦、手機都用同一招：複製提示詞 → `window.open("https://gemini.google.com/app")`。手機上有裝 Gemini App 的話，系統通常會直接用 App 開（App Links／Universal Links），使用者只剩「長按輸入框 → 貼上 → 送出」。底部提示會依裝置（`(hover: none)`）告訴使用者用長按還是 Ctrl/⌘+V。
+- 不用 `location.href` 在同一個分頁開 Gemini：字幕只在記憶體裡，離開這頁就沒了
+
+### 27. iPhone／iPad：用「捷徑」真正一鍵帶入 Gemini（補足 §26 做不到的部分）
+
+§26 查到 Gemini App 沒有能帶文字的連結，但使用者自己的「捷徑」裡可以用 Gemini App 提供的 **Ask Gemini** 動作，而捷徑本身有 Apple 官方的 URL scheme 可以從網頁執行並傳文字進去：
+
+```
+shortcuts://run-shortcut?name=<捷徑名稱>&input=text&text=<URL 編碼後的文字>
+```
+
+所以 iOS 上的流程變成：按「Gemini」→ Safari 問要不要打開「捷徑」→ 捷徑收到提示詞 → Ask Gemini。不用貼上。
+
+**實作**（`// ===== Gemini 開啟方式` 區塊）：
+- 字幕面板有「Gemini 開啟方式」設定：iOS 捷徑（可改捷徑名稱，預設「Gemini解說日文」）或網頁版。偵測到 iPhone／iPad 時預設用捷徑，其他預設網頁版；選擇與名稱存在 localStorage（`jst_gemini_mode_v1`、`jst_shortcut_name_v1`），這是設定，不是字幕
+- iPadOS 的 Safari 預設會回報成 Mac，所以 `IS_IOS` 另外用 `navigator.platform === "MacIntel" && maxTouchPoints > 1` 判斷
+- 用 `location.href` 開 `shortcuts://`：自訂 scheme 不會讓頁面離開，記憶體裡的字幕還在。包成 `launchUrl()`，測試時換掉，避免在有「捷徑」App 的 Mac 上真的執行使用者的捷徑
+- 一樣先把提示詞複製到剪貼簿：使用者的捷徑設計成「沒有輸入就讀剪貼簿」，萬一沒收到 text 也能用
+- 傳過去的是整段解說提示詞（含前後文與要求的格式），實測網址約 2.7 KB。如果捷徑的 Ask Gemini 前面還加了自己的前綴（例如「解說日文：」），會變成前綴＋提示詞，也能用；想要乾淨可以把 Ask Gemini 的內容改成只有「捷徑輸入」
+
+**沒辦法實測的部分**：Safari 的「打開捷徑」確認、捷徑實際執行與 Ask Gemini 的行為只能在 iPhone／iPad 上試；瀏覽器測試只驗證到產生的網址正確、頁面沒離開、剪貼簿有內容。
+
 ## 之後可能會想改的地方（先記下來，還沒做）
 
-- `LOOKAHEAD_SIZE`、`BATCH_DELAY_MS`、`MAX_AUTO_RETRIES`、`SOFT_RPD_LIMIT` 都是寫死的常數，沒有做成 UI 可調整（`SOFT_RPD_LIMIT` 最需要，因為免費層實際額度要自己試出來）
-- `shouldSkipLine()` 的門檻（日文字少於 3 個）是拍腦袋定的，可能會誤跳一些值得看的短句；目前靠彈窗的「還是分析這句」補救
-- N3 以上的判斷完全交給 Gemini 自己判斷，沒有額外驗證機制，模型偶爾可能誤判難度
-- 沒有做 notes 檔的 schema 遷移機制，之後如果 `version` 要升到 2，得補一段轉換邏輯（目前遇到版本比程式新只會停止寫入）
-- 非 Chromium 瀏覽器的退路只能存在瀏覽器裡、手動下載 notes JSON，沒有真正的檔案同步
-- 假名標注完全依賴模型自己標對，沒有字典可以驗證；遇到破音字（例如「入る」）有可能標錯
-- 這次改動之前解說過的句子沒有 `reading`，原句不會有假名，只能逐句「重新分析」補回來（會花額度）
+- 如果 Gemini 哪天支援網址或 App deep link 帶入提示詞，`askGemini()` 改成帶參數就能在 Android、桌機也一鍵送出（iOS 已經靠捷徑做到，§27）
+- 字幕只在記憶體裡：重新整理、或手機把分頁收掉就要重新搜尋。想保留的話可以考慮 sessionStorage（不算「存檔」，關掉分頁就沒了）
+- kitsunekko 的 `.smi`（SAMI）字幕還不支援，有些舊 zip 裡全是這種格式；`.rar` / `.7z` 也不支援
+- Jimaku 搜尋要 API key，沒有 key 的人只能用電腦上的 kitsunekko 書籤
