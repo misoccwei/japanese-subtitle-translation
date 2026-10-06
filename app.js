@@ -755,13 +755,24 @@ jimakuSearchForm.addEventListener("submit", async (event) => {
   }
 });
 
+// 同一部作品常同時有 .srt（串流平台的乾淨台詞）和字幕組的 .ass（夾雜特效、招牌字）。
+// 有 .srt 就不列 .ass／.ssa；排序：.srt → 其他能開的（zip、vtt…）→ 不支援的，同一組內依集數自然排序
+function arrangeJimakuFiles(files) {
+  const all = Array.isArray(files) ? files : [];
+  const hasSrt = all.some((f) => /\.srt$/i.test(f.name));
+  const list = hasSrt ? all.filter((f) => !/\.(ass|ssa)$/i.test(f.name)) : all.slice();
+  const rank = (f) => (/\.srt$/i.test(f.name) ? 0 : downloadableReason(f.name, f.size) ? 2 : 1);
+  list.sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name, undefined, { numeric: true }));
+  return { list, hiddenAss: all.length - list.length };
+}
+
 async function openJimakuEntry(entry) {
   setFindStatus(`讀取「${entry.japanese_name || entry.name}」的檔案…`);
   try {
-    const files = await jimakuGet(`/entries/${encodeURIComponent(entry.id)}/files`);
-    const list = (Array.isArray(files) ? files : []).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+    const { list, hiddenAss } = arrangeJimakuFiles(await jimakuGet(`/entries/${encodeURIComponent(entry.id)}/files`));
     Object.assign(findView, { entry, files: list, archive: null });
-    setFindStatus(`${entry.japanese_name || entry.name}：${list.length} 個檔案，點一個就會打開。`);
+    const hiddenNote = hiddenAss ? `（有 .srt，所以略過 ${hiddenAss} 個 .ass）` : "";
+    setFindStatus(`${entry.japanese_name || entry.name}：${list.length} 個檔案${hiddenNote}，點一個就會打開。`);
     renderFindView();
     findPanel.scrollIntoView({ behavior: "smooth", block: "start" });
   } catch (error) {

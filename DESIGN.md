@@ -448,6 +448,7 @@ Prompt（`buildPrompt()`）明確要求：
 - 請求帶 `X-Client-Id: japanese-subtitle-translation`：Jimaku 文件要求帶 User-Agent 或 X-Client-Id，而 fetch 改不了 User-Agent
 - 401 / 429 都翻成人話（429 是 Jimaku 以 IP 計算的速率限制）
 - `.rar` / `.7z`、超過 20 MB 的檔案直接停用，不讓使用者白等下載
+- 作品裡只要有 `.srt` 就不列 `.ass`／`.ssa`（`arrangeJimakuFiles()`）：`.srt` 多半是串流平台的乾淨台詞，字幕組的 `.ass` 夾雜特效與招牌字，兩者並列只會讓清單變長。排序是 `.srt` → 其他能開的（zip、vtt…）→ 不支援的，同組內依集數自然排序；狀態列會說略過了幾個 `.ass`。沒有 `.srt` 的作品照常列出 `.ass`
 - 卡片的狀態只有三層（搜尋結果 → 作品檔案 → zip 內容），用 `findView` 一個物件記錄，返回鈕往上退一層
 - 沒設 key 時 key 區塊自動展開（手機上很難發現要先填這個）；搜尋框字級 16px，避免 iOS Safari 一點就放大畫面
 
