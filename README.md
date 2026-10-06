@@ -1,6 +1,6 @@
 # 日文字幕語法拆解小工具
 
-從 [Jimaku](https://jimaku.cc/)／[kitsunekko](https://kitsunekko.net/dirlist.php?dir=subtitles%2Fjapanese%2F) 開日文字幕 → 拆成一句一句 → 每句右邊兩顆按鈕：**📋 複製**、**Gemini**（複製解說提示詞並打開 Gemini，解說直接在 Gemini 看）。
+從 [Jimaku](https://jimaku.cc/)／[kitsunekko](https://kitsunekko.net/dirlist.php?dir=subtitles%2Fjapanese%2F) 開日文字幕 → 拆成一句一句 → 每句右邊兩顆按鈕：**📋 複製**、**Gemini**（把這句送去 Gemini，解說直接在 Gemini 看）。
 
 純前端、零依賴、零建置：只有 `index.html` + `style.css` + `app.js` 三個檔案，可以直接丟上 GitHub Pages。不呼叫任何 AI API，也不讀寫你電腦裡的檔案。
 
@@ -10,8 +10,8 @@
 
 - **在頁面裡直接搜尋 Jimaku**：搜尋作品 → 點檔案就打開，手機平板也能用；kitsunekko 的字幕大多也收在 Jimaku 裡。`.zip` 會自動解壓，裡面有好幾集就列出來讓你挑（`.rar` / `.7z` 不支援）
 - **電腦上也可以直接從 kitsunekko 抓**：用書籤小工具在 kitsunekko 頁面上一鍵送回
-- **每句兩顆按鈕**：📋 複製這句；「Gemini」——iPhone／iPad 透過「捷徑」一鍵把這句日文送給 Gemini，其他裝置把這句加上前後文組成解說提示詞、複製好並打開 Gemini
-- **不存檔**：字幕只放在記憶體裡，重新整理後要再開一次
+- **每句兩顆按鈕**：📋 複製這句；「Gemini」——iPhone／iPad 透過「捷徑」一鍵把這句日文送給 Gemini，其他裝置複製「解說日文：＋這句」並打開 Gemini（怎麼解說交給你在 Gemini 的個人化設定）
+- **回到上次的狀態**：重新整理或下次回來，會自動打開上次的字幕、停在上次按過 📋／Gemini 的那一句；搜尋結果與檔案清單也會記住。只記得最後一個檔
 - **多種字幕格式**：`.srt` / `.vtt` / `.ass` / `.ssa` / `.sbv` / `.txt`，自動判斷 UTF-8／Shift_JIS／UTF-16 編碼
 
 ## 使用方式
@@ -36,7 +36,7 @@
 
 之後每句右邊按「Gemini」→ Safari 問要不要打開「捷徑」時按打開 → 捷徑收到這句日文原句，交給 Gemini 解說（怎麼解說由你的捷徑與 Gemini 個人化設定決定）。
 
-**電腦、Android**：按「Gemini」→ 提示詞已複製、Gemini 在新分頁打開 → 在輸入框貼上、送出。
+**電腦、Android**：按「Gemini」→ 已複製「解說日文：＋這句」、Gemini 在新分頁打開 → 在輸入框貼上、送出。
 Gemini 在這些平台不支援用網址或 App 連結直接帶入文字（見 DESIGN.md §26、§27）。
 
 ## 本機執行／自己部署一份
@@ -56,9 +56,9 @@ python3 -m http.server 5500
 
 ## 資料與隱私
 
-- 字幕只放在這個分頁的記憶體裡，不會存到你的裝置、也不會上傳到任何地方
-- 存在瀏覽器 `localStorage` 的只有 Jimaku API key（`jst_jimaku_key_v1`）與「Gemini 開啟方式」的設定，共用電腦用完請按「清除」
-- 按「Gemini」時，送到 Gemini 的內容是你自己貼上的那段提示詞
+- 只有「上次打開的那一個字幕」存在這個瀏覽器的 localStorage（只在這台裝置、不會上傳），按「關閉這個字幕」就清掉
+- 其他存在 `localStorage` 的只有 Jimaku API key（`jst_jimaku_key_v1`）、上一次的 Jimaku 搜尋結果（作品名、檔名與下載網址）與「Gemini 開啟方式」的設定，共用電腦用完請按「清除」
+- 按「Gemini」時，送到 Gemini 的只有那一句日文（網頁版前面加「解說日文：」）
 
 ## 檔案結構
 
@@ -66,7 +66,7 @@ python3 -m http.server 5500
 .
 ├── index.html                  # 頁面結構
 ├── style.css                   # 樣式
-├── app.js                      # 全部邏輯（Jimaku、kitsunekko 書籤、zip、字幕解析、複製、Gemini 提示詞）
+├── app.js                      # 全部邏輯（Jimaku、kitsunekko 書籤、zip、字幕解析、複製、Gemini／捷徑）
 ├── DESIGN.md                   # 設計決策與原因，改功能前先看這份
 ├── .github/workflows/deploy.yml  # GitHub Pages 部署
 └── .vscode/settings.json       # Live Server 埠號釘在 5500

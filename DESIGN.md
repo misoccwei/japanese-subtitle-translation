@@ -6,7 +6,7 @@
 
 從 Jimaku／kitsunekko 拿日文字幕（支援 `.srt` / `.vtt` / `.ass` / `.ssa` / `.sbv` / `.txt`，以及裝這些檔案的 `.zip`）→ 拆成逐句台詞（只保留文字與順序，不留時間軸）→ 每句右邊兩顆按鈕：**📋 複製這句**、**Gemini**（複製解說提示詞並打開 Gemini，解說直接在 Gemini 看）。
 
-**不呼叫任何 AI API、不讀寫本機檔案**：字幕只放在記憶體裡，重新整理就要再拿一次。唯一存在瀏覽器的是 Jimaku API key。
+**不呼叫任何 AI API、不讀寫本機檔案**：只把「上次打開的那一個字幕」與上次按過的那一句存在瀏覽器裡，重新整理後回到同一個狀態（§28）。
 
 純前端（HTML + CSS + 原生 JS），無框架、無建置流程，用 VS Code Live Server 或部署成 GitHub Pages 都可以（§21）。
 
@@ -16,7 +16,7 @@
 
 - `index.html` — 頁面結構：「找字幕」卡片 `#findPanel`（Jimaku 搜尋 + kitsunekko 書籤）、字幕清單 `#subtitlePanel` / `#lineList`、底部提示 `#toast`
 - `style.css` — 卡片式 UI 樣式
-- `app.js` — 所有邏輯：Jimaku 搜尋與下載、kitsunekko 書籤接收、zip 解壓與編碼判斷、字幕解析、清單渲染、複製、Gemini 提示詞
+- `app.js` — 所有邏輯：Jimaku 搜尋與下載、kitsunekko 書籤接收、zip 解壓與編碼判斷、字幕解析、上次打開的字幕（localStorage）、清單渲染、複製、Gemini 提示詞／捷徑
 - `.vscode/settings.json` — Live Server 埠釘在 5500（§14；現在只剩 Jimaku key 綁在 origin 上）
 - `DESIGN.md` — 本文件（設計決策與原因）
 - `README.md` — 給 repo 讀者看的使用/部署說明
@@ -448,6 +448,7 @@ Prompt（`buildPrompt()`）明確要求：
 - 請求帶 `X-Client-Id: japanese-subtitle-translation`：Jimaku 文件要求帶 User-Agent 或 X-Client-Id，而 fetch 改不了 User-Agent
 - 401 / 429 都翻成人話（429 是 Jimaku 以 IP 計算的速率限制）
 - `.rar` / `.7z`、超過 20 MB 的檔案直接停用，不讓使用者白等下載
+- **記住上一次的搜尋**（`saveLastSearch()`／`restoreLastSearch()`，localStorage `jst_jimaku_last_v1`）：搜尋、打開作品、按返回時存下關鍵字、作品清單、打開中的作品與它的檔案清單；重新整理或手機把分頁收掉後，直接回到同一個畫面，不用再搜（也不花 Jimaku 的請求次數）。只存清單的中繼資料（作品名、檔名、大小、下載網址），作品的 notes 等其他欄位不存；zip 解出來的集數清單是字幕內容本身，不存，重新整理後回到作品的檔案清單。紀錄壞掉就當作沒有
 - 作品裡只要有 `.srt` 就不列 `.ass`／`.ssa`（`arrangeJimakuFiles()`）：`.srt` 多半是串流平台的乾淨台詞，字幕組的 `.ass` 夾雜特效與招牌字，兩者並列只會讓清單變長。排序是 `.srt` → 其他能開的（zip、vtt…）→ 不支援的，同組內依集數自然排序；狀態列會說略過了幾個 `.ass`。沒有 `.srt` 的作品照常列出 `.ass`
 - 卡片的狀態只有三層（搜尋結果 → 作品檔案 → zip 內容），用 `findView` 一個物件記錄，返回鈕往上退一層
 - 沒設 key 時 key 區塊自動展開（手機上很難發現要先填這個）；搜尋框字級 16px，避免 iOS Safari 一點就放大畫面
@@ -457,7 +458,7 @@ Prompt（`buildPrompt()`）明確要求：
 **需求**：手機平板上點一下就到 Gemini 網頁版，解說直接看 Gemini 的回答。
 
 **限制**：Gemini 網頁版**沒有**「網址帶入提示詞」的功能（`?q=` 只有第三方的桌機 Chrome 擴充功能做得到，手機裝不了）。所以做不到真正的「點一下就送出」，退而求其次：
-1. 按鈕把整段提示詞（這句 + 最近的前後各一句當語境 + 要求的解說格式）複製到剪貼簿
+1. 按鈕把提示詞複製到剪貼簿（原本是這句 + 前後文 + 解說格式的長提示詞；§27 之後改成只有「解說日文：」＋原句）
 2. 同時開 `https://gemini.google.com/app`（手機上有裝 Gemini App 的話，系統可能直接用 App 開）
 3. 使用者在輸入框貼上、送出，解說就在 Gemini 裡看，不回傳到這個頁面
 
@@ -480,7 +481,7 @@ Prompt（`buildPrompt()`）明確要求：
 - 下載回來的字幕只進 `currentSubtitles`；zip 裡有好幾集就在「找字幕」卡片列出來挑（`showArchiveChooser()`）
 - `shouldSkipLine()` 留著，只用來把 ♪～ 這類句子淡化、以及替 Gemini 提示詞找前後文
 - `.ass` 解析補強（實測 Jimaku 上一個字幕組的 .ass：3,075 行 Dialogue 裡只有約 440 行是台詞）：`{\p1}` 之後是向量圖形座標，整行跳過；同一時間點的重複（多圖層）與跟上一句一模一樣的連續重複（逐格動畫的招牌字）只留一份；隔很遠的同一句台詞照樣保留
-- localStorage 只剩 Jimaku API key（`jst_jimaku_key_v1`）與 Gemini 開啟方式的設定（§27）；舊版留在瀏覽器裡的 `jst_api_key_v1` 等資料不會再被讀取
+- localStorage 只剩 Jimaku API key（`jst_jimaku_key_v1`）、上次搜尋的清單（§24）、上次打開的那一個字幕（§28）與 Gemini 開啟方式的設定（§27）；舊版留在瀏覽器裡的 `jst_api_key_v1` 等資料不會再被讀取
 
 **手機上「直接開 Gemini App 並帶入文字」做不到**（2026-10 查證）：
 - Gemini 網頁版沒有官方的網址參數可以帶入提示詞（`?q=` 只有第三方桌機擴充功能支援）
@@ -505,13 +506,28 @@ shortcuts://run-shortcut?name=<捷徑名稱>&input=text&text=<URL 編碼後的�
 - iPadOS 的 Safari 預設會回報成 Mac，所以 `IS_IOS` 另外用 `navigator.platform === "MacIntel" && maxTouchPoints > 1` 判斷
 - 用 `location.href` 開 `shortcuts://`：自訂 scheme 不會讓頁面離開，記憶體裡的字幕還在。包成 `launchUrl()`，測試時換掉，避免在有「捷徑」App 的 Mac 上真的執行使用者的捷徑
 - 一樣先把提示詞複製到剪貼簿：使用者的捷徑設計成「沒有輸入就讀剪貼簿」，萬一沒收到 text 也能用
-- **捷徑模式只傳日文原句**，剪貼簿備援也是同一句：使用者的捷徑（Ask Gemini 前面有「解說日文：」）與 Gemini 本身有個人化設定，知道要怎麼解說，送完整提示詞反而多餘。網頁版沒有這層個人化，仍然送 `buildGeminiPrompt()` 的完整提示詞（含前後文與格式要求）
+- **捷徑模式只傳日文原句**，剪貼簿備援也是同一句：使用者的捷徑（Ask Gemini 前面有「解說日文：」）與 Gemini 本身有個人化設定，知道要怎麼解說
+- **網頁版只複製「解說日文：」＋原句**（`GEMINI_WEB_PREFIX`）：使用者在 Gemini 設好了「解說日文」的個人化設定，所以原本自訂的長提示詞（`buildGeminiPrompt()`：前後文、讀音／翻譯／N3 單字文法等格式要求）整個拿掉，`nearbyLine()` 也跟著刪除
 
 **沒辦法實測的部分**：Safari 的「打開捷徑」確認、捷徑實際執行與 Ask Gemini 的行為只能在 iPhone／iPad 上試；瀏覽器測試只驗證到產生的網址正確、頁面沒離開、剪貼簿有內容。
+
+### 28. 只存「上次打開的那一個字幕」，重新整理回到同一個狀態（**推翻 §26 的「不存字幕」**）
+
+**需求演變**：先是「要存字幕，網頁能存的大小盡量存」，做了 IndexedDB 字幕庫（gzip 壓縮、LRU、已存清單）；接著改成「只需要存上一個取用的檔案，回復到上次開啟的狀態，不用多存太多檔案」。字幕庫整個拿掉，換成下面這個簡單版本。
+
+**做法**（`// ===== 上次打開的字幕` 區塊）：
+- localStorage `jst_last_file_v1` = `{ name, text, line, savedAt }`，**只有一個**：每打開一個新檔就蓋掉舊的，按「關閉這個字幕」就清掉
+- `line` 是上次按過 📋 或 Gemini 的那一句（`markLastLine()`）；重新整理後自動打開這個檔，那一句加上 `.is-last` 標示並捲到畫面中間。為了不跟瀏覽器自己的捲動還原搶，還原時把 `history.scrollRestoration` 設成 `manual`
+- 搭配 §24 的上次搜尋，重新整理後「找字幕」停在同一個作品的檔案清單、下面是同一個字幕的同一句
+- 為什麼用 localStorage 不用 IndexedDB：只存一個檔，字幕通常幾十～幾百 KB，localStorage（約 5 MB）綽綽有餘，而且是同步讀取，啟動時馬上還原、不用等。檔案大到存不進去（`setItem` 丟錯）就不存、也把舊的清掉，不會打開成別的檔
+- zip 的集數清單不還原：還原的是「打開的那一集」本身
+- 啟動時刪掉字幕庫版本留下的 IndexedDB `jst-library` 與舊 key `jst_last_opened_v1`，釋放空間
+
+**拿掉的東西**：「已存的字幕」卡片、多檔儲存、gzip 壓縮、空間不足時的 LRU、`navigator.storage.persist()`、Jimaku 清單的「✓ 已存」標記、點存過的檔不重新下載。
 
 ## 之後可能會想改的地方（先記下來，還沒做）
 
 - 如果 Gemini 哪天支援網址或 App deep link 帶入提示詞，`askGemini()` 改成帶參數就能在 Android、桌機也一鍵送出（iOS 已經靠捷徑做到，§27）
-- 字幕只在記憶體裡：重新整理、或手機把分頁收掉就要重新搜尋。想保留的話可以考慮 sessionStorage（不算「存檔」，關掉分頁就沒了）
+- 只記得最後一個檔：想在幾集之間來回切換的話，要重新從 Jimaku 打開（會重新下載）
 - kitsunekko 的 `.smi`（SAMI）字幕還不支援，有些舊 zip 裡全是這種格式；`.rar` / `.7z` 也不支援
 - Jimaku 搜尋要 API key，沒有 key 的人只能用電腦上的 kitsunekko 書籤

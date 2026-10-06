@@ -494,3 +494,9 @@ main {
   font-family: inherit;
   font-size: 16px; /* iOS 小於 16px 會自動放大畫面 */
 }
+
+/* 上次按過 📋／Gemini 的那一句：重新整理後還原到這裡 */
+.line-row.is-last {
+  background: #eff6ff;
+  box-shadow: inset 3px 0 0 var(--primary);
+}

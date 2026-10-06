@@ -1,14 +1,16 @@
 // ===== 設定 =====
-// 這個工具只做三件事：從 Jimaku／kitsunekko 拿字幕 → 拆成一句一句 → 每句可以複製、或丟給 Gemini 網頁版解說。
-// 不呼叫任何 AI API、不讀寫本機檔案；字幕只放在記憶體裡，重新整理就要再拿一次（見 DESIGN.md §26）。
+// 這個工具只做三件事：從 Jimaku／kitsunekko 拿字幕 → 拆成一句一句 → 每句可以複製、或丟給 Gemini 解說。
+// 不呼叫任何 AI API、不讀寫本機檔案；只把「上次打開的那一個字幕」存在瀏覽器裡，重新整理後回到同一個狀態（見 DESIGN.md §28）。
 const SUBTITLE_EXT_RE = /\.(srt|vtt|ass|ssa|sbv|txt)$/i;
 const KITSUNEKKO_URL = "https://kitsunekko.net/dirlist.php?dir=subtitles%2Fjapanese%2F";
 const KITSUNEKKO_ORIGIN_RE = /^https?:\/\/(www\.)?kitsunekko\.net$/;
 const KITSUNEKKO_MAX_BYTES = 20 * 1024 * 1024; // 單一檔案（含 zip）上限，正常字幕檔才幾十 KB
 const JIMAKU_API = "https://jimaku.cc/api";
 const JIMAKU_KEY_STORAGE_KEY = "jst_jimaku_key_v1";
+const JIMAKU_LAST_STORAGE_KEY = "jst_jimaku_last_v1"; // 上一次的搜尋：關鍵字、作品清單、打開過的作品檔案清單（只有名稱與網址，不含字幕內容）
 const JIMAKU_CLIENT_ID = "japanese-subtitle-translation"; // Jimaku 要求帶 User-Agent 或 X-Client-Id；fetch 改不了 UA，所以用後者
 const GEMINI_WEB_URL = "https://gemini.google.com/app";
+const LAST_FILE_KEY = "jst_last_file_v1"; // 上次打開的字幕：{ name, text, line, savedAt }，只存這一個
 const GEMINI_MODE_KEY = "jst_gemini_mode_v1"; // "shortcut" | "web"
 const SHORTCUT_NAME_KEY = "jst_shortcut_name_v1";
 const DEFAULT_SHORTCUT_NAME = "Gemini解說日文";
@@ -45,6 +47,7 @@ const shortcutNameInput = document.getElementById("shortcutNameInput");
 // ===== 狀態 =====
 let currentFileName = "";
 let currentSubtitles = []; // { order, text }[]
+let currentRawText = ""; // 目前打開的字幕原文，記錄「上次看到哪一句」時要連同內容一起存
 
 // ===== 純函式工具 =====
 const JP_CHAR_RE = /[぀-ゟ゠-ヿ一-鿿]/;
@@ -243,19 +246,22 @@ function parseSubtitleFile(rawText, filename) {
 }
 
 // ===== 字幕清單 =====
-function loadSubtitles(fileName, rawText) {
+function loadSubtitles(fileName, rawText, { scroll = true, save = true } = {}) {
   const subtitles = parseSubtitleFile(rawText, fileName);
   if (subtitles.length === 0) {
     showToast(`${fileName} 裡找不到字幕內容，請換一個檔案。`, 6000);
-    return;
+    return false;
   }
   currentFileName = fileName;
   currentSubtitles = subtitles;
+  currentRawText = rawText;
+  if (save) saveLastFile(null);
   currentFileTitle.textContent = fileName;
-  lineCountText.textContent = `共 ${subtitles.length} 句。📋 複製這句，「Gemini」複製解說提示詞並打開 Gemini。`;
+  lineCountText.textContent = `共 ${subtitles.length} 句。📋 複製這句，「Gemini」把這句送去 Gemini 解說。`;
   renderLineList();
   subtitlePanel.hidden = false;
-  subtitlePanel.scrollIntoView({ behavior: "smooth", block: "start" });
+  if (scroll) subtitlePanel.scrollIntoView({ behavior: "smooth", block: "start" });
+  return true;
 }
 
 function renderLineList() {
@@ -271,7 +277,7 @@ function renderLineList() {
       <span class="line-ja">${escapeHtml(sub.text)}</span>
       <span class="line-actions">
         <button type="button" class="line-copy" title="複製這句" aria-label="複製第 ${sub.order} 句">📋</button>
-        <button type="button" class="line-gemini" title="複製提示詞並開啟 Gemini" aria-label="用 Gemini 解說第 ${sub.order} 句">Gemini</button>
+        <button type="button" class="line-gemini" title="用 Gemini 解說這句" aria-label="用 Gemini 解說第 ${sub.order} 句">Gemini</button>
       </span>
     `;
     frag.appendChild(li);
@@ -284,17 +290,18 @@ lineListEl.addEventListener("click", (event) => {
   if (!row) return;
   const order = Number(row.dataset.order);
   const copyBtn = event.target.closest(".line-copy");
-  if (copyBtn) {
-    copyWithFeedback(copyBtn, currentSubtitles[order - 1]?.text || "", { done: "✓", failed: "✕" });
-    return;
-  }
   const geminiBtn = event.target.closest(".line-gemini");
-  if (geminiBtn) askGemini(order);
+  if (!copyBtn && !geminiBtn) return;
+  markLastLine(order);
+  if (copyBtn) copyWithFeedback(copyBtn, currentSubtitles[order - 1]?.text || "", { done: "✓", failed: "✕" });
+  else askGemini(order);
 });
 
 closeFileBtn.addEventListener("click", () => {
   currentFileName = "";
   currentSubtitles = [];
+  currentRawText = "";
+  clearLastFile();
   lineListEl.replaceChildren();
   subtitlePanel.hidden = true;
   findPanel.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -524,7 +531,6 @@ async function importDownloadedSubtitle(rawName, buffer) {
     throw new Error("不是支援的字幕格式");
   }
 
-  // 不存檔：字幕只放在記憶體裡，每次都從 Jimaku／kitsunekko 重新拿（見 DESIGN.md §26）。
   // zip 裡有好幾集時不替使用者決定，列出來讓他挑
   if (files.length > 1) {
     showArchiveChooser(name, files);
@@ -583,6 +589,49 @@ try {
 
 // 「找字幕」卡片目前顯示什麼：搜尋結果 → 某部作品的檔案 → 某個 zip 裡的檔案
 const findView = { entries: null, entry: null, files: null, archive: null };
+
+// 記住上一次的搜尋，重新整理或手機分頁被收掉後回到同一個畫面，不用再搜一次（也省 Jimaku 的請求次數）。
+// 只存清單的中繼資料（作品名、檔名、大小、下載網址）；zip 解出來的內容是字幕本身，不存
+function saveLastSearch() {
+  if (!findView.entries) return;
+  const pickEntry = (e) => ({ id: e.id, name: e.name, english_name: e.english_name, japanese_name: e.japanese_name, flags: e.flags });
+  const data = {
+    savedAt: Date.now(),
+    query: findView.query || "",
+    entries: findView.entries.map(pickEntry),
+    entry: findView.entry ? pickEntry(findView.entry) : null,
+    files: findView.files ? findView.files.map((f) => ({ name: f.name, size: f.size, url: f.url })) : null,
+    hiddenAss: findView.hiddenAss || 0,
+  };
+  try {
+    localStorage.setItem(JIMAKU_LAST_STORAGE_KEY, JSON.stringify(data));
+  } catch (_error) {
+    // 存不進去就算了，只是下次要重新搜尋
+  }
+}
+
+function restoreLastSearch() {
+  let data = null;
+  try {
+    data = JSON.parse(localStorage.getItem(JIMAKU_LAST_STORAGE_KEY) || "null");
+  } catch (_error) {
+    return;
+  }
+  if (!data || !Array.isArray(data.entries)) return;
+  Object.assign(findView, {
+    query: data.query || "",
+    entries: data.entries,
+    entry: data.entry || null,
+    files: Array.isArray(data.files) ? data.files : null,
+    hiddenAss: data.hiddenAss || 0,
+    archive: null,
+  });
+  jimakuQuery.value = findView.query;
+  const when = new Date(data.savedAt || Date.now()).toLocaleString([], { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  const where = findView.files && findView.entry ? `，停在「${findView.entry.japanese_name || findView.entry.name}」的檔案清單` : "";
+  setFindStatus(`上次（${when}）搜尋「${findView.query}」的結果${where}。`);
+  renderFindView();
+}
 
 function setFindStatus(message) {
   findStatus.hidden = !message;
@@ -744,9 +793,10 @@ jimakuSearchForm.addEventListener("submit", async (event) => {
   setFindStatus("搜尋中…");
   try {
     const entries = await jimakuGet(`/entries/search?query=${encodeURIComponent(query)}`);
-    Object.assign(findView, { entries: Array.isArray(entries) ? entries.slice(0, 50) : [], entry: null, files: null, archive: null });
+    Object.assign(findView, { query, entries: Array.isArray(entries) ? entries.slice(0, 50) : [], entry: null, files: null, hiddenAss: 0, archive: null });
     setFindStatus(findView.entries.length ? `找到 ${entries.length} 部作品${entries.length > 50 ? "（只列前 50 部）" : ""}，點一部看檔案。` : "");
     renderFindView();
+    saveLastSearch();
   } catch (error) {
     setFindStatus(error.message);
     if (!jimakuKey) jimakuKeyDetails.open = true;
@@ -770,7 +820,8 @@ async function openJimakuEntry(entry) {
   setFindStatus(`讀取「${entry.japanese_name || entry.name}」的檔案…`);
   try {
     const { list, hiddenAss } = arrangeJimakuFiles(await jimakuGet(`/entries/${encodeURIComponent(entry.id)}/files`));
-    Object.assign(findView, { entry, files: list, archive: null });
+    Object.assign(findView, { entry, files: list, hiddenAss, archive: null });
+    saveLastSearch();
     const hiddenNote = hiddenAss ? `（有 .srt，所以略過 ${hiddenAss} 個 .ass）` : "";
     setFindStatus(`${entry.japanese_name || entry.name}：${list.length} 個檔案${hiddenNote}，點一個就會打開。`);
     renderFindView();
@@ -811,45 +862,19 @@ function openFromArchive(file) {
 
 findBackBtn.addEventListener("click", () => {
   if (findView.archive) findView.archive = null;
-  else if (findView.files) Object.assign(findView, { entry: null, files: null });
+  else if (findView.files) Object.assign(findView, { entry: null, files: null, hiddenAss: 0 });
   setFindStatus("");
   renderFindView();
+  saveLastSearch();
 });
 
-// ===== 用 Gemini 網頁版解說單句 =====
+// ===== 用 Gemini 解說單句 =====
 // Gemini 沒有「帶入提示詞」的方法（2026-10 查證）：網頁版的 ?q= 只有第三方桌機擴充功能做得到；
 // 手機 App 沒有可帶文字的 deep link，Android 分享選單只收圖片／檔案、iOS 沒有分享擴充功能。
-// 所以做法是：把整段提示詞複製到剪貼簿 → 開 Gemini（手機有裝 App 的話系統會直接用 App 開）→ 使用者貼上送出。
-// 解說直接看 Gemini 的回答，不回傳到這裡。
+// 所以網頁版的做法是：複製到剪貼簿 → 開 Gemini → 使用者貼上送出；iOS 改走捷徑（見下面的 askGemini 與 DESIGN.md §27）。
+// 怎麼解說交給使用者在 Gemini 設好的個人化設定：網頁版只送「解說日文：」＋原句，捷徑只送原句（捷徑自己會加前綴）。
 // 複製要在 window.open 之前「開始」：開新分頁後這頁失去焦點，剪貼簿 API 會拒絕。
-function nearbyLine(order, step) {
-  for (let o = order + step, n = 0; o >= 1 && o <= currentSubtitles.length && n < 3; o += step, n += 1) {
-    const sub = currentSubtitles[o - 1];
-    if (!shouldSkipLine(sub.text)) return sub.text;
-  }
-  return null;
-}
-
-function buildGeminiPrompt(order) {
-  const sub = currentSubtitles[order - 1];
-  const prev = nearbyLine(order, -1);
-  const next = nearbyLine(order, 1);
-  const context = [prev && `前一句：${prev}`, next && `後一句：${next}`].filter(Boolean);
-  return [
-    "請你當日文老師，用繁體中文解說下面這句日文台詞（出自日劇或動畫字幕）：",
-    "",
-    `「${sub.text}」`,
-    ...(context.length ? ["", "前後文（只是幫助理解語境，不用解說）：", ...context] : []),
-    "",
-    "請依序寫出：",
-    "1. 讀音：整句照抄，在每個漢字詞後面用括號標平假名",
-    "2. 中文翻譯：自然的口語說法",
-    "3. 單字：N3 以上的單字與動詞，列出原形、讀音、中文意思；動詞要說明在這句裡是什麼變化",
-    "4. 文法：N3 以上的文法點，說明接續方式與語感，各舉一個例句",
-    "5. 語氣與情境：這句話給人的感覺、什麼場合會這樣說",
-    "N4 以下的基礎單字與文法不用解釋。",
-  ].join("\n");
-}
+const GEMINI_WEB_PREFIX = "解說日文：";
 
 let toastTimer = null;
 
@@ -928,26 +953,81 @@ function askGemini(order) {
     return;
   }
 
-  // 網頁版沒有個人化可依靠，送完整的解說提示詞（含前後文與要求的格式）
-  const copied = copyText(buildGeminiPrompt(order));
+  // 網頁版：「解說日文：」＋原句，對應使用者在 Gemini 設好的個人化設定
+  const copied = copyText(`${GEMINI_WEB_PREFIX}${sub.text}`);
 
   const win = window.open(GEMINI_WEB_URL, "_blank");
   if (win) win.opener = null; // 不讓 Gemini 那邊拿到這個分頁
   copied.then((ok) => {
     if (!ok) {
-      showToast("瀏覽器不讓自動複製。請先按 📋 複製這句，到 Gemini 貼上並請它解說。", 8000);
+      showToast("瀏覽器不讓自動複製。請先按 📋 複製這句，到 Gemini 輸入「解說日文：」後貼上。", 8000);
     } else if (!win) {
-      showToast("提示詞已複製，但新分頁被擋掉了：請自己打開 Gemini，在輸入框貼上送出。", 8000);
+      showToast("已複製，但新分頁被擋掉了：請自己打開 Gemini，在輸入框貼上送出。", 8000);
     } else {
       // 手機、平板沒有滑鼠：有裝 Gemini App 的話系統會直接用 App 開，貼上要長按輸入框
       const touch = window.matchMedia?.("(hover: none)").matches;
       showToast(touch
-        ? `第 ${order} 句的提示詞已複製。在 Gemini 輸入框長按 →「貼上」→ 送出。`
-        : `第 ${order} 句的提示詞已複製。在 Gemini 輸入框按 Ctrl/⌘+V 貼上、送出。`);
+        ? `已複製「解說日文：第 ${order} 句」。在 Gemini 輸入框長按 →「貼上」→ 送出。`
+        : `已複製「解說日文：第 ${order} 句」。在 Gemini 輸入框按 Ctrl/⌘+V 貼上、送出。`);
     }
   });
+}
+
+// ===== 上次打開的字幕（只存這一個）=====
+// 重新整理、或手機把分頁收掉之後，回到上次打開的字幕與上次按過的那一句。
+// 只存一個檔（新的蓋掉舊的），字幕檔通常幾十～幾百 KB，放 localStorage 就夠；太大存不進去就算了。
+function saveLastFile(line) {
+  if (!currentFileName) return;
+  try {
+    localStorage.setItem(LAST_FILE_KEY, JSON.stringify({ name: currentFileName, text: currentRawText, line, savedAt: Date.now() }));
+  } catch (error) {
+    console.warn("上次打開的字幕太大，沒有存", error);
+    clearLastFile();
+  }
+}
+
+function clearLastFile() {
+  try {
+    localStorage.removeItem(LAST_FILE_KEY);
+  } catch (_error) {
+    // 本來就沒存
+  }
+}
+
+function markLastLine(order) {
+  lineListEl.querySelector(".line-row.is-last")?.classList.remove("is-last");
+  lineListEl.querySelector(`.line-row[data-order="${order}"]`)?.classList.add("is-last");
+  saveLastFile(order);
+}
+
+function restoreLastFile() {
+  let data = null;
+  try {
+    data = JSON.parse(localStorage.getItem(LAST_FILE_KEY) || "null");
+  } catch (_error) {
+    clearLastFile();
+    return;
+  }
+  if (!data || typeof data.name !== "string" || typeof data.text !== "string") return;
+  if (!loadSubtitles(data.name, data.text, { scroll: false, save: false })) return;
+  const row = Number.isInteger(data.line) && lineListEl.querySelector(`.line-row[data-order="${data.line}"]`);
+  if (row) {
+    row.classList.add("is-last");
+    // 自己捲到上次那一句，不讓瀏覽器的捲動還原跟我們搶
+    if ("scrollRestoration" in history) history.scrollRestoration = "manual";
+    row.scrollIntoView({ block: "center" });
+  }
 }
 
 // ===== 啟動 =====
 renderJimakuKey();
 renderGeminiMode();
+restoreLastSearch();
+restoreLastFile();
+// 舊版（§28 初版）曾把所有打開過的字幕存在 IndexedDB 的 jst-library，現在用不到了，清掉釋放空間
+try {
+  window.indexedDB?.deleteDatabase("jst-library");
+  localStorage.removeItem("jst_last_opened_v1");
+} catch (_error) {
+  // 沒有就算了
+}
