@@ -905,16 +905,20 @@ function launchUrl(url) {
 }
 
 function askGemini(order) {
-  if (!currentSubtitles[order - 1]) return;
-  const prompt = buildGeminiPrompt(order);
-  // 不管哪種方式都先複製：網頁版要貼上，捷徑沒收到輸入時也會改讀剪貼簿
-  const copied = copyText(prompt);
+  const sub = currentSubtitles[order - 1];
+  if (!sub) return;
 
+  // 捷徑模式只傳日文原句：使用者的捷徑／Gemini 已經有個人化設定，知道要怎麼解說。
+  // 也先複製同一句，捷徑沒收到輸入時會改讀剪貼簿
   if (geminiMode === "shortcut") {
-    launchUrl(`shortcuts://run-shortcut?name=${encodeURIComponent(shortcutName)}&input=text&text=${encodeURIComponent(prompt)}`);
+    copyText(sub.text);
+    launchUrl(`shortcuts://run-shortcut?name=${encodeURIComponent(shortcutName)}&input=text&text=${encodeURIComponent(sub.text)}`);
     showToast(`用捷徑「${shortcutName}」開 Gemini…（Safari 問要不要打開「捷徑」時按「打開」）`, 6000);
     return;
   }
+
+  // 網頁版沒有個人化可依靠，送完整的解說提示詞（含前後文與要求的格式）
+  const copied = copyText(buildGeminiPrompt(order));
 
   const win = window.open(GEMINI_WEB_URL, "_blank");
   if (win) win.opener = null; // 不讓 Gemini 那邊拿到這個分頁

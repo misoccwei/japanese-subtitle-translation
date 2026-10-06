@@ -504,7 +504,7 @@ shortcuts://run-shortcut?name=<捷徑名稱>&input=text&text=<URL 編碼後的�
 - iPadOS 的 Safari 預設會回報成 Mac，所以 `IS_IOS` 另外用 `navigator.platform === "MacIntel" && maxTouchPoints > 1` 判斷
 - 用 `location.href` 開 `shortcuts://`：自訂 scheme 不會讓頁面離開，記憶體裡的字幕還在。包成 `launchUrl()`，測試時換掉，避免在有「捷徑」App 的 Mac 上真的執行使用者的捷徑
 - 一樣先把提示詞複製到剪貼簿：使用者的捷徑設計成「沒有輸入就讀剪貼簿」，萬一沒收到 text 也能用
-- 傳過去的是整段解說提示詞（含前後文與要求的格式），實測網址約 2.7 KB。如果捷徑的 Ask Gemini 前面還加了自己的前綴（例如「解說日文：」），會變成前綴＋提示詞，也能用；想要乾淨可以把 Ask Gemini 的內容改成只有「捷徑輸入」
+- **捷徑模式只傳日文原句**，剪貼簿備援也是同一句：使用者的捷徑（Ask Gemini 前面有「解說日文：」）與 Gemini 本身有個人化設定，知道要怎麼解說，送完整提示詞反而多餘。網頁版沒有這層個人化，仍然送 `buildGeminiPrompt()` 的完整提示詞（含前後文與格式要求）
 
 **沒辦法實測的部分**：Safari 的「打開捷徑」確認、捷徑實際執行與 Ask Gemini 的行為只能在 iPhone／iPad 上試；瀏覽器測試只驗證到產生的網址正確、頁面沒離開、剪貼簿有內容。
 
