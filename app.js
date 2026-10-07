@@ -614,9 +614,15 @@ document.addEventListener("touchmove", (event) => {
     drag.x = touch.clientX;
     drag.y = touch.clientY;
     extendDragSelect(sentenceAt(touch.clientX, touch.clientY));
-  } else if (touchPending && Math.hypot(touch.clientX - touchPending.x, touch.clientY - touchPending.y) > DRAG_MOVE_TOLERANCE_PX) {
-    clearTimeout(touchPending.timer);
-    touchPending = null;
+  } else if (touchPending) {
+    if (Math.hypot(touch.clientX - touchPending.x, touch.clientY - touchPending.y) > DRAG_MOVE_TOLERANCE_PX) {
+      clearTimeout(touchPending.timer);
+      touchPending = null;
+    } else {
+      // 長按等待中，容許範圍內的小晃動也要擋掉捲動：iOS Safari 只要手勢一開始就讓它捲動，
+      // 之後長按計時器觸發才 preventDefault 已經來不及了（手勢已經被判定成捲動）
+      event.preventDefault();
+    }
   }
 }, { passive: false });
 
