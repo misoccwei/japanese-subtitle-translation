@@ -10,7 +10,7 @@
 <body>
   <header>
     <h1>日文字幕語法拆解小工具</h1>
-    <p class="subtitle">從 Jimaku／kitsunekko 開字幕，每句一鍵複製，或丟給 Gemini 解說</p>
+    <p class="subtitle">從 Jimaku／kitsunekko 開字幕，每段一鍵複製，或丟給 Gemini 解說</p>
   </header>
 
   <main>
@@ -20,7 +20,7 @@
       <p class="cache-hint">
         直接在這裡搜尋 <a href="https://jimaku.cc/" target="_blank" rel="noopener noreferrer">Jimaku</a>、點檔案就會打開，手機平板也能用。
         kitsunekko 的字幕大多也收在 Jimaku 裡（作品頁標「External」的那些）。
-        重新整理或下次回來時，會自動打開上次的字幕、停在上次按過的那一句（只記得最後一個檔）。
+        重新整理或下次回來時，會自動打開上次的字幕、停在上次按過的那一段（只記得最後一個檔）。
       </p>
 
       <details id="jimakuKeyDetails" class="tools-details">
@@ -98,11 +98,11 @@
         </label>
         <label class="mode-option">
           <input type="radio" name="geminiMode" value="web">
-          <span><strong>Gemini 網頁版</strong>：複製「解說日文：＋這句」並打開 gemini.google.com，自己貼上送出</span>
+          <span><strong>Gemini 網頁版</strong>：複製「解說日文：＋這段」並打開 gemini.google.com，自己貼上送出</span>
         </label>
         <p class="cache-hint">
           捷徑的做法：在「捷徑」App 建一個接收文字的捷徑，加入 Gemini 的「Ask Gemini」動作，內容放「捷徑輸入」。
-          捷徑模式只把這句日文原句傳過去；網頁版複製「解說日文：」＋這句日文。
+          捷徑模式只把這段日文原文傳過去；網頁版複製「解說日文：」＋這段日文。
           要怎麼解說交給你的捷徑與 Gemini 個人化設定。
         </p>
       </details>

@@ -302,10 +302,13 @@ main {
   font-family: "SFMono-Regular", Menlo, Consolas, monospace;
 }
 
+/* 一列是一段，段落裡的句子用換行分開（pre-line 保留換行） */
 .line-ja {
   flex: 1 1 auto;
   min-width: 0;
   font-size: 0.98rem;
+  line-height: 1.7;
+  white-space: pre-line;
   overflow-wrap: anywhere;
 }
 
@@ -315,10 +318,13 @@ main {
 }
 
 /* 每列右邊的動作鈕（複製、Gemini）：桌機平常淡淡的、滑到那一列才清楚；
-   觸控裝置沒有 hover，所以常駐，並放大到手指點得到的尺寸 */
+   觸控裝置沒有 hover，所以常駐，並放大到手指點得到的尺寸。
+   一段可能很長：按鈕放在段落頂端，捲動時黏在畫面上方，看到哪都按得到 */
 .line-actions {
   flex: 0 0 auto;
-  align-self: center;
+  align-self: flex-start;
+  position: sticky;
+  top: 8px;
   display: flex;
   align-items: center;
   gap: 4px;

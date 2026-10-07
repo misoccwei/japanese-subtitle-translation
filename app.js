@@ -1,5 +1,5 @@
 // ===== 設定 =====
-// 這個工具只做三件事：從 Jimaku／kitsunekko 拿字幕 → 拆成一句一句 → 每句可以複製、或丟給 Gemini 解說。
+// 這個工具只做三件事：從 Jimaku／kitsunekko 拿字幕 → 依停頓分成一段一段 → 每段可以複製、或丟給 Gemini 解說。
 // 不呼叫任何 AI API、不讀寫本機檔案；只把「上次打開的那一個字幕」存在瀏覽器裡，重新整理後回到同一個狀態（見 DESIGN.md §28）。
 const SUBTITLE_EXT_RE = /\.(srt|vtt|ass|ssa|sbv|txt)$/i;
 const KITSUNEKKO_URL = "https://kitsunekko.net/dirlist.php?dir=subtitles%2Fjapanese%2F";
@@ -46,8 +46,8 @@ const shortcutNameInput = document.getElementById("shortcutNameInput");
 
 // ===== 狀態 =====
 let currentFileName = "";
-let currentSubtitles = []; // { order, text }[]
-let currentRawText = ""; // 目前打開的字幕原文，記錄「上次看到哪一句」時要連同內容一起存
+let currentSubtitles = []; // { order, text }[]：一段一筆，段落裡的句子用換行分開
+let currentRawText = ""; // 目前打開的字幕原文，記錄「上次看到哪一段」時要連同內容一起存
 
 // ===== 純函式工具 =====
 const JP_CHAR_RE = /[぀-ゟ゠-ヿ一-鿿]/;
@@ -92,7 +92,7 @@ function escapeHtml(str) {
 }
 
 
-// ===== 字幕解析（支援多種格式，只取文字內容，不保留時間軸，順序以出現先後為準）=====
+// ===== 字幕解析（支援多種格式，只取文字內容，順序以出現先後為準；時間軸只拿來斷句、分段，不顯示）=====
 // Netflix 來源的字幕每句前後會包一層看不見的方向控制字元（U+202A…U+202C 等），
 // 不拿掉的話複製出去、送給 Gemini、拿來當快取 key 都會帶著這些垃圾。所有格式都會有，所以在 parseSubtitleFile 一次清掉。
 const BIDI_CONTROL_RE = /[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g;
@@ -101,9 +101,23 @@ function stripTags(text) {
   return text.replace(/<[^>]+>/g, "").replace(/\{[^}]*\}/g, "").trim();
 }
 
+// 有時間軸的格式（SRT／VTT／SBV）先解析成 cue：{ start, end, lines }（時間單位毫秒），再交給 cuesToSentences 重組成句子
+function parseTimestamp(str) {
+  const m = /(?:(\d+):)?(\d{1,2}):(\d{2})[.,](\d{1,3})/.exec(str || "");
+  if (!m) return null;
+  return ((Number(m[1] || 0) * 60 + Number(m[2])) * 60 + Number(m[3])) * 1000 + Number(m[4].padEnd(3, "0"));
+}
+
+function cueFrom(timeLine, textLines) {
+  const [startStr, endStr] = timeLine.split(/-->|,(?=\d+:\d{2}:\d{2}\.)/);
+  const lines = textLines.map(stripTags).filter(Boolean);
+  if (lines.length === 0) return null;
+  return { start: parseTimestamp(startStr), end: parseTimestamp(endStr), lines };
+}
+
 function parseSRT(text) {
   const blocks = text.split(/\n\s*\n/);
-  const lines = [];
+  const cues = [];
   for (const block of blocks) {
     const blockLines = block.split("\n").map((l) => l.trim()).filter(Boolean);
     if (blockLines.length === 0) continue;
@@ -114,17 +128,16 @@ function parseSRT(text) {
     const timeLine = blockLines[idx];
     if (!timeLine || !/-->/.test(timeLine)) continue;
 
-    const textLines = blockLines.slice(idx + 1);
-    const fullText = stripTags(textLines.join(" "));
-    if (fullText) lines.push(fullText);
+    const cue = cueFrom(timeLine, blockLines.slice(idx + 1));
+    if (cue) cues.push(cue);
   }
-  return lines;
+  return cues;
 }
 
 function parseVTT(text) {
   const withoutHeader = text.replace(/^WEBVTT[^\n]*\n?/i, "");
   const blocks = withoutHeader.split(/\n\s*\n/);
-  const lines = [];
+  const cues = [];
   for (const block of blocks) {
     const blockLines = block.split("\n").map((l) => l.trim()).filter(Boolean);
     if (blockLines.length === 0) continue;
@@ -136,56 +149,15 @@ function parseVTT(text) {
     const timeLine = blockLines[idx];
     if (!timeLine || !/-->/.test(timeLine)) continue;
 
-    const textLines = blockLines.slice(idx + 1);
-    const fullText = stripTags(textLines.join(" "));
-    if (fullText) lines.push(fullText);
+    const cue = cueFrom(timeLine, blockLines.slice(idx + 1));
+    if (cue) cues.push(cue);
   }
-  return lines;
-}
-
-function parseASS(text) {
-  const rawLines = text.split(/\r?\n/);
-  const lines = [];
-  let textFieldIndex = 9; // 標準 ASS/SSA 的 Dialogue 欄位中，Text 是第 10 個欄位（index 9）
-  let startFieldIndex = 1;
-  const seen = new Set();
-
-  for (const rawLine of rawLines) {
-    const line = rawLine.trim();
-    if (/^Format:/i.test(line)) {
-      const fields = line.slice(line.indexOf(":") + 1).split(",").map((f) => f.trim());
-      const foundIndex = fields.findIndex((f) => /^text$/i.test(f));
-      if (foundIndex !== -1) textFieldIndex = foundIndex;
-      const foundStart = fields.findIndex((f) => /^start$/i.test(f));
-      if (foundStart !== -1) startFieldIndex = foundStart;
-      continue;
-    }
-    if (/^Dialogue:/i.test(line)) {
-      const content = line.slice(line.indexOf(":") + 1);
-      const parts = content.split(",");
-      const dialogueText = parts.slice(textFieldIndex).join(",");
-      // 字幕組的 .ass 常有大量向量圖形（{\p1} 之後的文字是繪圖座標，不是台詞），整行跳過
-      if (/\{[^}]*\\p[1-9]/.test(dialogueText)) continue;
-      const cleaned = dialogueText
-        .replace(/\{[^}]*\}/g, "")
-        .replace(/\\N|\\n/gi, " ")
-        .replace(/\\h/g, " ")
-        .trim();
-      if (!cleaned) continue;
-      // 招牌、特效字常把同一段字疊在好幾個圖層、同一個時間點，或是逐格動畫拆成一連串相同文字的行：
-      // 同時間點的重複、以及跟上一句一模一樣的連續重複都只留一份（隔很遠的同一句台詞照樣保留）
-      const key = `${(parts[startFieldIndex] || "").trim()}|${cleaned}`;
-      if (seen.has(key) || lines[lines.length - 1] === cleaned) continue;
-      seen.add(key);
-      lines.push(cleaned);
-    }
-  }
-  return lines;
+  return cues;
 }
 
 function parseSBV(text) {
   const blocks = text.split(/\n\s*\n/);
-  const lines = [];
+  const cues = [];
   const timeLinePattern = /^\d+:\d{2}:\d{2}\.\d{3},\d+:\d{2}:\d{2}\.\d{3}$/;
 
   for (const block of blocks) {
@@ -193,11 +165,112 @@ function parseSBV(text) {
     if (blockLines.length === 0) continue;
     if (!timeLinePattern.test(blockLines[0])) continue;
 
-    const textLines = blockLines.slice(1);
-    const fullText = stripTags(textLines.join(" "));
-    if (fullText) lines.push(fullText);
+    const cue = cueFrom(blockLines[0], blockLines.slice(1));
+    if (cue) cues.push(cue);
   }
-  return lines;
+  return cues;
+}
+
+// ===== cue → 句子 =====
+// 字幕的 cue 是照「畫面上放得下、念得完」切的，不是照句子切：
+// - 一個 cue 裡可能是兩個人的對話（每行開頭標說話者「（おさく）」或對話破折號「－」），要拆開；
+// - 一句長台詞常被拆到連續幾個 cue（「ここら辺りまで来たので―」｜「おめえたちの顔が見たくて…」），要接回去。
+// 「話還沒講完」要看這個檔的寫法（整個檔一起判斷，各家字幕組習慣不同）：
+// - dash：Netflix 在要接到下一個 cue 的句尾放「―」「—」，有就接，沒有就是講完了；
+// - period：電視台字幕每句都收「。」「！」「？」，沒收尾就是還沒講完；同一個 cue 裡收了尾的行也拆成兩句；
+// - plain：兩種都沒有，只能看句尾的助詞，挑誤判少的幾個（「て」「で」常是命令句結尾，不列）。
+// 都是啟發式：寧可少接，也不要把兩個人的話黏成一大串。
+const UTTERANCE_START_RE = /^(?:[（(][^）)]{1,15}[）)]|[-－‐―–—]\s*)/; // 說話者標記、對話破折號、或（音效）
+const UNCLOSED_PAIRS = [["「", "」"], ["『", "』"], ["《", "》"], ["（", "）"], ["(", ")"]];
+const DASH_CONTINUES_RE = /[―—→]$/;
+const SENTENCE_END_RE = /[。．！？!?…‥」』》）)～〜♪]$/;
+const PLAIN_CONTINUES_RE = /(?:[、，,]|が|を|は|ので|のに)$/;
+const MERGE_MAX_GAP_MS = 1500;
+const MERGE_MAX_BRACKET_GAP_MS = 5000; // 「…」《…》還沒關起來是很強的訊號，間隔可以放寬
+const MERGE_MAX_CHARS = 80;
+
+function hasUnclosedBracket(text) {
+  return UNCLOSED_PAIRS.some(([open, close]) => text.split(open).length > text.split(close).length);
+}
+
+function detectContinuationStyle(cues) {
+  const lastLines = cues.map((c) => c.lines[c.lines.length - 1]);
+  if (lastLines.filter((l) => DASH_CONTINUES_RE.test(l)).length >= 3) return "dash";
+  if (lastLines.filter((l) => /[。．]$/.test(l)).length >= lastLines.length * 0.2) return "period";
+  return "plain";
+}
+
+function cueToUtterances(lines, style) {
+  const utterances = [];
+  for (const line of lines) {
+    const prev = utterances[utterances.length - 1];
+    const splitHere = !prev || UTTERANCE_START_RE.test(line) || (style === "period" && SENTENCE_END_RE.test(prev) && !hasUnclosedBracket(prev));
+    if (splitHere) utterances.push(line);
+    else utterances[utterances.length - 1] += " " + line;
+  }
+  return utterances.map((u) => u.replace(/^[-－‐―–—]\s*/, "").trim()).filter(Boolean);
+}
+
+function continuesIntoNext(text, style, gap) {
+  if (hasUnclosedBracket(text)) return gap <= MERGE_MAX_BRACKET_GAP_MS;
+  if (gap > MERGE_MAX_GAP_MS) return false;
+  // 「おい！―」這種是同一個人接著講下一句，句子本身已經完整，不接
+  if (style === "dash") return DASH_CONTINUES_RE.test(text) && !/[！？!?]\s*[―—→]$/.test(text);
+  if (style === "period") return !SENTENCE_END_RE.test(text);
+  return PLAIN_CONTINUES_RE.test(text);
+}
+
+function cuesToSentences(cues) {
+  const style = detectContinuationStyle(cues);
+  const sentences = [];
+  let prevCue = null;
+  for (const cue of cues) {
+    const utterances = cueToUtterances(cue.lines, style);
+    if (utterances.length === 0) continue;
+    if (prevCue && !UTTERANCE_START_RE.test(cue.lines[0])) {
+      const last = sentences[sentences.length - 1];
+      const gap = cue.start != null && prevCue.end != null ? cue.start - prevCue.end : Infinity;
+      if (continuesIntoNext(last.text, style, gap) && last.text.length + utterances[0].length <= MERGE_MAX_CHARS) {
+        last.text = `${last.text} ${utterances.shift()}`;
+        last.end = cue.end;
+      }
+    }
+    sentences.push(...utterances.map((text) => ({ text, start: cue.start, end: cue.end })));
+    prevCue = cue;
+  }
+  return sentences;
+}
+
+// ===== 句子 → 段落 =====
+// 解說以「段」為單位：使用者的 Gemini 設定會自己把段落拆句解說，給它整段對話，主語、代名詞、誰對誰說話都比較判斷得出來。
+// 停頓超過 PARAGRAPH_GAP_MS 就換一段（講話中間幾乎不會停這麼久，通常是換場景）。
+// 但吵架、連珠炮的場景可以好幾分鐘都沒停頓，一段會長到幾千字（實測一集 Netflix 時代劇最長 2641 字），
+// 所以超過 PARAGRAPH_MAX_CHARS 的段，再從段裡停頓最久的地方切開，切到每段都在上限內（或只剩一句）。
+const PARAGRAPH_GAP_MS = 2000;
+const PARAGRAPH_MAX_CHARS = 200;
+
+function sentenceGap(a, b) {
+  return a.end != null && b.start != null ? b.start - a.end : 0;
+}
+
+function splitLongParagraph(sentences) {
+  const chars = sentences.reduce((sum, s) => sum + s.text.length, 0);
+  if (chars <= PARAGRAPH_MAX_CHARS || sentences.length < 2) return [sentences];
+  let cut = 1;
+  for (let i = 2; i < sentences.length; i++) {
+    if (sentenceGap(sentences[i - 1], sentences[i]) > sentenceGap(sentences[cut - 1], sentences[cut])) cut = i;
+  }
+  return [...splitLongParagraph(sentences.slice(0, cut)), ...splitLongParagraph(sentences.slice(cut))];
+}
+
+function sentencesToParagraphs(sentences) {
+  const groups = [];
+  for (const sentence of sentences) {
+    const group = groups[groups.length - 1];
+    if (group && sentenceGap(group[group.length - 1], sentence) < PARAGRAPH_GAP_MS) group.push(sentence);
+    else groups.push([sentence]);
+  }
+  return groups.flatMap(splitLongParagraph).map((group) => group.map((s) => s.text).join("\n"));
 }
 
 function parsePlainText(text) {
@@ -226,16 +299,16 @@ function parseSubtitleFile(rawText, filename) {
   let lines;
   switch (format) {
     case "vtt":
-      lines = parseVTT(normalized);
+      lines = sentencesToParagraphs(cuesToSentences(parseVTT(normalized)));
       break;
     case "ass":
       lines = parseASS(normalized);
       break;
     case "sbv":
-      lines = parseSBV(normalized);
+      lines = sentencesToParagraphs(cuesToSentences(parseSBV(normalized)));
       break;
     case "srt":
-      lines = parseSRT(normalized);
+      lines = sentencesToParagraphs(cuesToSentences(parseSRT(normalized)));
       break;
     default:
       lines = parsePlainText(normalized);
@@ -257,7 +330,7 @@ function loadSubtitles(fileName, rawText, { scroll = true, save = true } = {}) {
   currentRawText = rawText;
   if (save) saveLastFile(null);
   currentFileTitle.textContent = fileName;
-  lineCountText.textContent = `共 ${subtitles.length} 句。📋 複製這句，「Gemini」把這句送去 Gemini 解說。`;
+  lineCountText.textContent = `共 ${subtitles.length} 段。📋 複製這段，「Gemini」把這段送去 Gemini 解說。`;
   renderLineList();
   subtitlePanel.hidden = false;
   if (scroll) subtitlePanel.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -270,14 +343,14 @@ function renderLineList() {
     const li = document.createElement("li");
     li.className = "line-row";
     li.dataset.order = String(sub.order);
-    // 音效、符號這類句子淡化顯示（判斷規則見 shouldSkipLine），但按鈕照樣可以用
-    if (shouldSkipLine(sub.text)) li.classList.add("is-minor");
+    // 整段都是音效、符號這類句子就淡化顯示（判斷規則見 shouldSkipLine），但按鈕照樣可以用
+    if (sub.text.split("\n").every(shouldSkipLine)) li.classList.add("is-minor");
     li.innerHTML = `
       <span class="line-order">${sub.order}</span>
       <span class="line-ja">${escapeHtml(sub.text)}</span>
       <span class="line-actions">
-        <button type="button" class="line-copy" title="複製這句" aria-label="複製第 ${sub.order} 句">📋</button>
-        <button type="button" class="line-gemini" title="用 Gemini 解說這句" aria-label="用 Gemini 解說第 ${sub.order} 句">Gemini</button>
+        <button type="button" class="line-copy" title="複製這段" aria-label="複製第 ${sub.order} 段">📋</button>
+        <button type="button" class="line-gemini" title="用 Gemini 解說這段" aria-label="用 Gemini 解說第 ${sub.order} 段">Gemini</button>
       </span>
     `;
     frag.appendChild(li);
@@ -868,7 +941,7 @@ findBackBtn.addEventListener("click", () => {
   saveLastSearch();
 });
 
-// ===== 用 Gemini 解說單句 =====
+// ===== 用 Gemini 解說一段 =====
 // Gemini 沒有「帶入提示詞」的方法（2026-10 查證）：網頁版的 ?q= 只有第三方桌機擴充功能做得到；
 // 手機 App 沒有可帶文字的 deep link，Android 分享選單只收圖片／檔案、iOS 沒有分享擴充功能。
 // 所以網頁版的做法是：複製到剪貼簿 → 開 Gemini → 使用者貼上送出；iOS 改走捷徑（見下面的 askGemini 與 DESIGN.md §27）。
@@ -945,7 +1018,7 @@ function askGemini(order) {
   if (!sub) return;
 
   // 捷徑模式只傳日文原句：使用者的捷徑／Gemini 已經有個人化設定，知道要怎麼解說。
-  // 也先複製同一句，捷徑沒收到輸入時會改讀剪貼簿
+  // 也先複製同一段，捷徑沒收到輸入時會改讀剪貼簿
   if (geminiMode === "shortcut") {
     copyText(sub.text);
     launchUrl(`shortcuts://run-shortcut?name=${encodeURIComponent(shortcutName)}&input=text&text=${encodeURIComponent(sub.text)}`);
@@ -960,21 +1033,21 @@ function askGemini(order) {
   if (win) win.opener = null; // 不讓 Gemini 那邊拿到這個分頁
   copied.then((ok) => {
     if (!ok) {
-      showToast("瀏覽器不讓自動複製。請先按 📋 複製這句，到 Gemini 輸入「解說日文：」後貼上。", 8000);
+      showToast("瀏覽器不讓自動複製。請先按 📋 複製這段，到 Gemini 輸入「解說日文：」後貼上。", 8000);
     } else if (!win) {
       showToast("已複製，但新分頁被擋掉了：請自己打開 Gemini，在輸入框貼上送出。", 8000);
     } else {
       // 手機、平板沒有滑鼠：有裝 Gemini App 的話系統會直接用 App 開，貼上要長按輸入框
       const touch = window.matchMedia?.("(hover: none)").matches;
       showToast(touch
-        ? `已複製「解說日文：第 ${order} 句」。在 Gemini 輸入框長按 →「貼上」→ 送出。`
-        : `已複製「解說日文：第 ${order} 句」。在 Gemini 輸入框按 Ctrl/⌘+V 貼上、送出。`);
+        ? `已複製「解說日文：第 ${order} 段」。在 Gemini 輸入框長按 →「貼上」→ 送出。`
+        : `已複製「解說日文：第 ${order} 段」。在 Gemini 輸入框按 Ctrl/⌘+V 貼上、送出。`);
     }
   });
 }
 
 // ===== 上次打開的字幕（只存這一個）=====
-// 重新整理、或手機把分頁收掉之後，回到上次打開的字幕與上次按過的那一句。
+// 重新整理、或手機把分頁收掉之後，回到上次打開的字幕與上次按過的那一段。
 // 只存一個檔（新的蓋掉舊的），字幕檔通常幾十～幾百 KB，放 localStorage 就夠；太大存不進去就算了。
 function saveLastFile(line) {
   if (!currentFileName) return;
@@ -1013,7 +1086,7 @@ function restoreLastFile() {
   const row = Number.isInteger(data.line) && lineListEl.querySelector(`.line-row[data-order="${data.line}"]`);
   if (row) {
     row.classList.add("is-last");
-    // 自己捲到上次那一句，不讓瀏覽器的捲動還原跟我們搶
+    // 自己捲到上次那一段，不讓瀏覽器的捲動還原跟我們搶
     if ("scrollRestoration" in history) history.scrollRestoration = "manual";
     row.scrollIntoView({ block: "center" });
   }
