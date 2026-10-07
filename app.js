@@ -275,14 +275,16 @@ function splitLongParagraph(sentences, maxChars) {
 }
 
 function sentencesToParagraphs(sentences, { enabled = true, gapMs, maxChars } = DEFAULT_PARAGRAPH_OPTIONS) {
-  if (!enabled) return sentences.map((s) => [s.text]);
+  if (!enabled) return sentences.map((s) => ({ lines: [s.text], start: s.start }));
   const groups = [];
   for (const sentence of sentences) {
     const group = groups[groups.length - 1];
     if (group && sentenceGap(group[group.length - 1], sentence) < gapMs) group.push(sentence);
     else groups.push([sentence]);
   }
-  return groups.flatMap((group) => splitLongParagraph(group, maxChars)).map((group) => group.map((s) => s.text));
+  return groups
+    .flatMap((group) => splitLongParagraph(group, maxChars))
+    .map((group) => ({ lines: group.map((s) => s.text), start: group[0].start }));
 }
 
 function parsePlainText(text) {
@@ -314,7 +316,7 @@ function parseSubtitleFile(rawText, filename, paragraphOptions = DEFAULT_PARAGRA
       lines = sentencesToParagraphs(cuesToSentences(parseVTT(normalized)), paragraphOptions);
       break;
     case "ass":
-      lines = parseASS(normalized).map((line) => [line]);
+      lines = parseASS(normalized).map((line) => ({ lines: [line], start: null }));
       break;
     case "sbv":
       lines = sentencesToParagraphs(cuesToSentences(parseSBV(normalized)), paragraphOptions);
@@ -323,12 +325,22 @@ function parseSubtitleFile(rawText, filename, paragraphOptions = DEFAULT_PARAGRA
       lines = sentencesToParagraphs(cuesToSentences(parseSRT(normalized)), paragraphOptions);
       break;
     default:
-      lines = parsePlainText(normalized).map((line) => [line]);
+      lines = parsePlainText(normalized).map((line) => ({ lines: [line], start: null }));
       break;
   }
 
-  // lines：一段一個陣列，陣列裡是這段的句子
-  return lines.map((sentences, i) => ({ order: i + 1, text: sentences.join("\n"), lines: sentences }));
+  // 一段一筆：lines 是這段的句子，start 是第一句的開始時間（毫秒，沒有時間軸的格式是 null）
+  return lines.map((para, i) => ({ order: i + 1, text: para.lines.join("\n"), lines: para.lines, start: para.start }));
+}
+
+// 毫秒 → 「1:23」或「1:02:03」
+function formatTimestamp(ms) {
+  if (ms == null || !Number.isFinite(ms)) return "";
+  const total = Math.floor(ms / 1000);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const sec = String(total % 60).padStart(2, "0");
+  return h ? `${h}:${String(m).padStart(2, "0")}:${sec}` : `${m}:${sec}`;
 }
 
 // ===== 字幕清單 =====
@@ -353,8 +365,8 @@ function loadSubtitles(fileName, rawText, { scroll = true, save = true } = {}) {
   // 分段關掉時一列就是一句（沒時間軸的格式也一樣），用詞跟著換
   const unit = subtitles.every((sub) => sub.lines.length === 1) ? "句" : "段";
   lineCountText.textContent = unit === "段"
-    ? `共 ${subtitles.length} 段。📋 複製這段，「Gemini」把這段送去 Gemini 解說；點句子可以勾選幾句（點段落編號整段勾選），合在一起複製或送出。`
-    : `共 ${subtitles.length} 句。📋 複製這句，「Gemini」把這句送去 Gemini 解說；點句子可以勾選幾句，合在一起複製或送出。`;
+    ? `共 ${subtitles.length} 段。點句子勾選（拖曳可以一次選好幾句，手機要先長按），點段落編號整段勾選，再用底下的 📋 複製／Gemini。`
+    : `共 ${subtitles.length} 句。點句子勾選（拖曳可以一次選好幾句，手機要先長按），再用底下的 📋 複製／Gemini。`;
   renderLineList();
   renderSelectionBar();
   subtitlePanel.hidden = false;
@@ -368,18 +380,18 @@ function renderLineList() {
     const li = document.createElement("li");
     li.className = "line-row";
     li.dataset.order = String(sub.order);
-    // 整段都是音效、符號這類句子就淡化顯示（判斷規則見 shouldSkipLine），但按鈕照樣可以用
+    // 整段都是音效、符號這類句子就淡化顯示（判斷規則見 shouldSkipLine），照樣可以勾選
     if (sub.lines.every(shouldSkipLine)) li.classList.add("is-minor");
     const sentences = sub.lines
       .map((line, i) => `<span class="line-sentence" data-idx="${sub.firstIdx + i}" role="checkbox" aria-checked="false" tabindex="0">${escapeHtml(line)}</span>`)
       .join("");
+    // 編號底下是這段第一句的時間，方便對照影片
+    const time = formatTimestamp(sub.start);
     li.innerHTML = `
-      <button type="button" class="line-order" title="勾選／取消整段" aria-label="勾選第 ${sub.order} 段全部句子" aria-pressed="false">${sub.order}</button>
+      <button type="button" class="line-order" title="勾選／取消整段" aria-label="勾選第 ${sub.order} 段全部句子${time ? `（${time}）` : ""}" aria-pressed="false">
+        <span class="line-order-num">${sub.order}</span>${time ? `<span class="line-time">${time}</span>` : ""}
+      </button>
       <span class="line-ja">${sentences}</span>
-      <span class="line-actions">
-        <button type="button" class="line-copy" title="複製這段" aria-label="複製第 ${sub.order} 段">📋</button>
-        <button type="button" class="line-gemini" title="用 Gemini 解說這段" aria-label="用 Gemini 解說第 ${sub.order} 段">Gemini</button>
-      </span>
     `;
     refreshSelectionMarks(li);
     frag.appendChild(li);
@@ -395,18 +407,9 @@ lineListEl.addEventListener("click", (event) => {
     return;
   }
   const sentence = event.target.closest(".line-sentence");
-  // 拖曳選取文字（想自己複製一小段）時不要順便勾選
-  if (sentence && window.getSelection()?.isCollapsed !== false) {
-    toggleSentence(sentence);
-    return;
-  }
-  const order = Number(row.dataset.order);
-  const copyBtn = event.target.closest(".line-copy");
-  const geminiBtn = event.target.closest(".line-gemini");
-  if (!copyBtn && !geminiBtn) return;
-  markLastLine(order);
-  if (copyBtn) copyWithFeedback(copyBtn, currentSubtitles[order - 1]?.text || "", { done: "✓", failed: "✕" });
-  else askGemini(order);
+  // 拖曳多選剛結束（放開時瀏覽器會補一個 click），或在一句裡拖曳選取文字（想自己複製一小段）時，不要再切換勾選
+  if (!sentence || Date.now() < suppressClickUntil || window.getSelection()?.isCollapsed === false) return;
+  toggleSentence(sentence);
 });
 
 lineListEl.addEventListener("keydown", (event) => {
@@ -474,9 +477,160 @@ function clearSelection() {
   renderSelectionBar();
 }
 
-selectionCopyBtn.addEventListener("click", () => copyWithFeedback(selectionCopyBtn, selectedText()));
-selectionGeminiBtn.addEventListener("click", () => sendToGemini(selectedText(), `勾選的 ${selectedSentences.size} 句`));
+// 「上次看到哪」記成勾選的第一句所在的那一段，重新整理後捲回那裡
+function markSelectionAsLast() {
+  const first = Math.min(...selectedSentences);
+  const sub = currentSubtitles.find((s) => first >= s.firstIdx && first < s.firstIdx + s.lines.length);
+  if (sub) markLastLine(sub.order);
+}
+
+selectionCopyBtn.addEventListener("click", () => {
+  markSelectionAsLast();
+  copyWithFeedback(selectionCopyBtn, selectedText());
+});
+selectionGeminiBtn.addEventListener("click", () => {
+  markSelectionAsLast();
+  sendToGemini(selectedText(), `勾選的 ${selectedSentences.size} 句`);
+});
 selectionClearBtn.addEventListener("click", clearSelection);
+
+// ===== 拖曳一次勾選好幾句 =====
+// 從一句拖到另一句，中間（照字幕順序，可以跨段）全部設成跟起點相反的狀態：起點沒勾就全勾，起點有勾就全取消。
+// - 滑鼠：按住拖到「別句」才算拖曳多選；在同一句裡拖曳還是一般的選取文字
+// - 觸控：直接滑是捲動畫面，要先長按 DRAG_LONG_PRESS_MS 再拖。觸控裝置上句子不能選取文字（見 style.css），不然長按會跳出系統的選字選單
+// - 拖到畫面上下緣會自動捲動，可以一路選到畫面外
+const DRAG_LONG_PRESS_MS = 350;
+const DRAG_MOVE_TOLERANCE_PX = 10; // 長按期間手指晃動超過這個距離，就當成要捲動
+const DRAG_EDGE_PX = 70;
+const DRAG_BOTTOM_EDGE_PX = 110; // 底部有勾選操作列，感應區留大一點
+let drag = null; // { anchor, target, snapshot, last, x, y, raf }
+let mousePending = null; // 滑鼠按下、還沒拖到別句：{ el }
+let touchPending = null; // 手指按下、還在等長按：{ el, x, y, timer }
+let suppressClickUntil = 0;
+
+function sentenceAt(x, y) {
+  return document.elementFromPoint(x, y)?.closest?.(".line-sentence") || null;
+}
+
+function startDragSelect(anchorEl, x, y) {
+  const anchor = Number(anchorEl.dataset.idx);
+  drag = { anchor, target: !selectedSentences.has(anchor), snapshot: new Set(selectedSentences), last: null, x, y, raf: 0 };
+  document.body.classList.add("is-drag-selecting");
+  window.getSelection()?.removeAllRanges();
+  extendDragSelect(anchorEl);
+  drag.raf = requestAnimationFrame(dragAutoScroll);
+}
+
+function extendDragSelect(el) {
+  if (!drag || !el) return;
+  const idx = Number(el.dataset.idx);
+  if (idx === drag.last) return;
+  // 要重畫的範圍：上一次拖到的範圍 ∪ 這一次的範圍
+  const prev = drag.last ?? drag.anchor;
+  const lo = Math.min(drag.anchor, prev, idx);
+  const hi = Math.max(drag.anchor, prev, idx);
+  drag.last = idx;
+  selectedSentences.clear();
+  drag.snapshot.forEach((i) => selectedSentences.add(i));
+  for (let i = Math.min(drag.anchor, idx); i <= Math.max(drag.anchor, idx); i++) {
+    if (drag.target) selectedSentences.add(i);
+    else selectedSentences.delete(i);
+  }
+  for (const sub of currentSubtitles) {
+    if (sub.firstIdx > hi) break;
+    if (sub.firstIdx + sub.lines.length - 1 >= lo) refreshSelectionMarks(lineListEl.children[sub.order - 1]);
+  }
+  renderSelectionBar();
+}
+
+function dragAutoScroll() {
+  if (!drag) return;
+  const speed = drag.y < DRAG_EDGE_PX ? -12 : drag.y > window.innerHeight - DRAG_BOTTOM_EDGE_PX ? 12 : 0;
+  if (speed) {
+    window.scrollBy(0, speed);
+    extendDragSelect(sentenceAt(drag.x, drag.y));
+  }
+  drag.raf = requestAnimationFrame(dragAutoScroll);
+}
+
+function endDragSelect() {
+  if (!drag) return;
+  cancelAnimationFrame(drag.raf);
+  drag = null;
+  document.body.classList.remove("is-drag-selecting");
+  suppressClickUntil = Date.now() + 400;
+}
+
+lineListEl.addEventListener("mousedown", (event) => {
+  const sentence = event.button === 0 && event.target.closest(".line-sentence");
+  mousePending = sentence ? { el: sentence } : null;
+});
+
+document.addEventListener("mousemove", (event) => {
+  if (!drag && !mousePending) return;
+  if (!(event.buttons & 1)) {
+    mousePending = null;
+    endDragSelect();
+    return;
+  }
+  const el = sentenceAt(event.clientX, event.clientY);
+  if (!drag) {
+    if (!el || el === mousePending.el) return; // 還在同一句裡：讓瀏覽器照常選取文字
+    startDragSelect(mousePending.el, event.clientX, event.clientY);
+    mousePending = null;
+  }
+  drag.x = event.clientX;
+  drag.y = event.clientY;
+  event.preventDefault();
+  extendDragSelect(el);
+});
+
+document.addEventListener("mouseup", () => {
+  mousePending = null;
+  endDragSelect();
+});
+
+lineListEl.addEventListener("touchstart", (event) => {
+  const sentence = event.touches.length === 1 && event.target.closest(".line-sentence");
+  if (!sentence) return;
+  const { clientX: x, clientY: y } = event.touches[0];
+  touchPending = {
+    el: sentence,
+    x,
+    y,
+    timer: setTimeout(() => {
+      touchPending = null;
+      startDragSelect(sentence, x, y);
+      navigator.vibrate?.(10);
+    }, DRAG_LONG_PRESS_MS),
+  };
+}, { passive: true });
+
+// 拖曳多選時要擋掉捲動，所以不能是 passive
+document.addEventListener("touchmove", (event) => {
+  const touch = event.touches[0];
+  if (drag) {
+    event.preventDefault();
+    drag.x = touch.clientX;
+    drag.y = touch.clientY;
+    extendDragSelect(sentenceAt(touch.clientX, touch.clientY));
+  } else if (touchPending && Math.hypot(touch.clientX - touchPending.x, touch.clientY - touchPending.y) > DRAG_MOVE_TOLERANCE_PX) {
+    clearTimeout(touchPending.timer);
+    touchPending = null;
+  }
+}, { passive: false });
+
+function endTouch() {
+  if (touchPending) clearTimeout(touchPending.timer);
+  touchPending = null;
+  endDragSelect();
+}
+document.addEventListener("touchend", endTouch);
+document.addEventListener("touchcancel", endTouch);
+// Android 長按會跳右鍵選單
+lineListEl.addEventListener("contextmenu", (event) => {
+  if (drag || touchPending) event.preventDefault();
+});
 
 closeFileBtn.addEventListener("click", () => {
   currentFileName = "";
@@ -1053,7 +1207,7 @@ findBackBtn.addEventListener("click", () => {
 // ===== 用 Gemini 解說一段 =====
 // Gemini 沒有「帶入提示詞」的方法（2026-10 查證）：網頁版的 ?q= 只有第三方桌機擴充功能做得到；
 // 手機 App 沒有可帶文字的 deep link，Android 分享選單只收圖片／檔案、iOS 沒有分享擴充功能。
-// 所以網頁版的做法是：複製到剪貼簿 → 開 Gemini → 使用者貼上送出；iOS 改走捷徑（見下面的 askGemini 與 DESIGN.md §27）。
+// 所以網頁版的做法是：複製到剪貼簿 → 開 Gemini → 使用者貼上送出；iOS 改走捷徑（見下面的 sendToGemini 與 DESIGN.md §27）。
 // 怎麼解說交給使用者在 Gemini 設好的個人化設定：網頁版只送「解說日文：」＋原句，捷徑只送原句（捷徑自己會加前綴）。
 // 複製要在 window.open 之前「開始」：開新分頁後這頁失去焦點，剪貼簿 API 會拒絕。
 const GEMINI_WEB_PREFIX = "解說日文：";
@@ -1246,12 +1400,7 @@ function launchUrl(url) {
   window.location.href = url;
 }
 
-function askGemini(order) {
-  const sub = currentSubtitles[order - 1];
-  if (sub) sendToGemini(sub.text, `第 ${order} 段`);
-}
-
-// label 只用在提示訊息裡，例如「第 3 段」「勾選的 4 句」
+// label 只用在提示訊息裡，例如「勾選的 4 句」
 function sendToGemini(text, label) {
   if (!text) return;
 

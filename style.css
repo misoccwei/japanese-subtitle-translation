@@ -297,9 +297,12 @@ main {
 .line-order {
   flex: 0 0 auto;
   align-self: flex-start;
-  min-width: 2.6em;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  min-width: 3.8em;
   margin-top: 2px;
-  padding: 2px 4px;
+  padding: 2px 5px;
   border: 1px solid transparent;
   border-radius: 6px;
   background: none;
@@ -315,6 +318,12 @@ main {
   .line-order:hover {
     border-color: #f59e0b;
   }
+}
+
+/* 編號底下：這段第一句的時間 */
+.line-time {
+  font-size: 0.68rem;
+  opacity: 0.8;
 }
 
 .line-order.is-some {
@@ -364,75 +373,23 @@ main {
   color: var(--text-muted);
 }
 
-/* 每列右邊的動作鈕（複製、Gemini）：桌機平常淡淡的、滑到那一列才清楚；
-   觸控裝置沒有 hover，所以常駐，並放大到手指點得到的尺寸。
-   一段可能很長：按鈕放在段落頂端，捲動時黏在畫面上方，看到哪都按得到 */
-.line-actions {
-  flex: 0 0 auto;
-  align-self: flex-start;
-  position: sticky;
-  top: 8px;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.line-copy,
-.line-gemini {
-  border: none;
-  border-radius: 6px;
-  line-height: 1;
-  cursor: pointer;
-  transition: opacity 0.1s ease, background-color 0.1s ease;
-}
-
-.line-copy {
-  background: transparent;
-  padding: 4px 6px;
-  font-size: 0.9rem;
-  opacity: 0.3;
-}
-
-.line-gemini {
-  background: var(--secondary);
-  color: var(--secondary-text);
-  padding: 5px 9px;
-  font-size: 0.78rem;
-  font-weight: 600;
-  opacity: 0.45;
-}
-
-.line-row:hover .line-copy,
-.line-row:hover .line-gemini,
-.line-copy:focus-visible,
-.line-gemini:focus-visible {
-  opacity: 1;
-}
-
-.line-copy:hover {
-  background: var(--secondary);
-}
-
-.line-gemini:hover {
-  background: var(--primary);
-  color: #fff;
-}
-
+/* 觸控裝置：句子不能選取文字，長按才會進入拖曳多選，不會跳出系統的選字選單 */
 @media (hover: none) {
   .line-order {
-    min-height: 32px;
-  }
-
-  .line-copy,
-  .line-gemini {
-    opacity: 1;
     min-height: 36px;
   }
 
-  .line-copy {
-    min-width: 36px;
-    font-size: 1rem;
+  .line-sentence {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
   }
+}
+
+/* 拖曳多選途中不要順便選到文字 */
+body.is-drag-selecting {
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 @media (max-width: 640px) {
