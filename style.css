@@ -476,6 +476,29 @@ main {
   font-size: 16px;
 }
 
+/* ===== 分段設定 ===== */
+.paragraph-settings {
+  margin-bottom: 8px;
+}
+
+.paragraph-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: 0.92rem;
+}
+
+/* 16px 以上，iOS Safari 點進去才不會自動放大 */
+.number-input {
+  display: inline-block;
+  width: 5.5em;
+  margin: 0 4px;
+  padding: 6px 8px;
+  font-family: inherit;
+  font-size: 16px;
+}
+
 /* ===== Gemini 開啟方式 ===== */
 .gemini-mode {
   margin-bottom: 8px;

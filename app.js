@@ -13,6 +13,7 @@ const GEMINI_WEB_URL = "https://gemini.google.com/app";
 const LAST_FILE_KEY = "jst_last_file_v1"; // 上次打開的字幕：{ name, text, line, savedAt }，只存這一個
 const GEMINI_MODE_KEY = "jst_gemini_mode_v1"; // "shortcut" | "web"
 const SHORTCUT_NAME_KEY = "jst_shortcut_name_v1";
+const PARAGRAPH_SETTINGS_KEY = "jst_paragraph_v1"; // 分段設定：{ gapSec, maxChars }
 const DEFAULT_SHORTCUT_NAME = "Gemini解說日文";
 // iPadOS 的 Safari 預設回報成 Mac，要用觸控點數分辨
 const IS_IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
@@ -43,6 +44,9 @@ const toastEl = document.getElementById("toast");
 const geminiModeSummary = document.getElementById("geminiModeSummary");
 const geminiModeRadios = document.querySelectorAll('input[name="geminiMode"]');
 const shortcutNameInput = document.getElementById("shortcutNameInput");
+const paragraphSummary = document.getElementById("paragraphSummary");
+const paragraphGapInput = document.getElementById("paragraphGapInput");
+const paragraphMaxInput = document.getElementById("paragraphMaxInput");
 
 // ===== 狀態 =====
 let currentFileName = "";
@@ -243,34 +247,34 @@ function cuesToSentences(cues) {
 
 // ===== 句子 → 段落 =====
 // 解說以「段」為單位：使用者的 Gemini 設定會自己把段落拆句解說，給它整段對話，主語、代名詞、誰對誰說話都比較判斷得出來。
-// 停頓超過 PARAGRAPH_GAP_MS 就換一段（講話中間幾乎不會停這麼久，通常是換場景）。
+// 停頓超過 gapMs 就換一段（講話中間幾乎不會停這麼久，通常是換場景）。
 // 但吵架、連珠炮的場景可以好幾分鐘都沒停頓，一段會長到幾千字（實測一集 Netflix 時代劇最長 2641 字），
-// 所以超過 PARAGRAPH_MAX_CHARS 的段，再從段裡停頓最久的地方切開，切到每段都在上限內（或只剩一句）。
-const PARAGRAPH_GAP_MS = 2000;
-const PARAGRAPH_MAX_CHARS = 200;
+// 所以超過 maxChars 的段，再從段裡停頓最久的地方切開，切到每段都在上限內（或只剩一句）。
+// 兩個值使用者可以在「分段設定」調整（見下面的 paragraphSettings），這裡是預設值。
+const DEFAULT_PARAGRAPH_OPTIONS = { gapMs: 2000, maxChars: 200 };
 
 function sentenceGap(a, b) {
   return a.end != null && b.start != null ? b.start - a.end : 0;
 }
 
-function splitLongParagraph(sentences) {
+function splitLongParagraph(sentences, maxChars) {
   const chars = sentences.reduce((sum, s) => sum + s.text.length, 0);
-  if (chars <= PARAGRAPH_MAX_CHARS || sentences.length < 2) return [sentences];
+  if (chars <= maxChars || sentences.length < 2) return [sentences];
   let cut = 1;
   for (let i = 2; i < sentences.length; i++) {
     if (sentenceGap(sentences[i - 1], sentences[i]) > sentenceGap(sentences[cut - 1], sentences[cut])) cut = i;
   }
-  return [...splitLongParagraph(sentences.slice(0, cut)), ...splitLongParagraph(sentences.slice(cut))];
+  return [...splitLongParagraph(sentences.slice(0, cut), maxChars), ...splitLongParagraph(sentences.slice(cut), maxChars)];
 }
 
-function sentencesToParagraphs(sentences) {
+function sentencesToParagraphs(sentences, { gapMs, maxChars } = DEFAULT_PARAGRAPH_OPTIONS) {
   const groups = [];
   for (const sentence of sentences) {
     const group = groups[groups.length - 1];
-    if (group && sentenceGap(group[group.length - 1], sentence) < PARAGRAPH_GAP_MS) group.push(sentence);
+    if (group && sentenceGap(group[group.length - 1], sentence) < gapMs) group.push(sentence);
     else groups.push([sentence]);
   }
-  return groups.flatMap(splitLongParagraph).map((group) => group.map((s) => s.text).join("\n"));
+  return groups.flatMap((group) => splitLongParagraph(group, maxChars)).map((group) => group.map((s) => s.text).join("\n"));
 }
 
 function parsePlainText(text) {
@@ -291,7 +295,7 @@ function detectFormat(text, filename) {
   return "text";
 }
 
-function parseSubtitleFile(rawText, filename) {
+function parseSubtitleFile(rawText, filename, paragraphOptions = DEFAULT_PARAGRAPH_OPTIONS) {
   const normalized = rawText.replace(/\r\n/g, "\n").replace(/^﻿/, "").replace(BIDI_CONTROL_RE, "").trim();
   if (!normalized) return [];
 
@@ -299,16 +303,16 @@ function parseSubtitleFile(rawText, filename) {
   let lines;
   switch (format) {
     case "vtt":
-      lines = sentencesToParagraphs(cuesToSentences(parseVTT(normalized)));
+      lines = sentencesToParagraphs(cuesToSentences(parseVTT(normalized)), paragraphOptions);
       break;
     case "ass":
       lines = parseASS(normalized);
       break;
     case "sbv":
-      lines = sentencesToParagraphs(cuesToSentences(parseSBV(normalized)));
+      lines = sentencesToParagraphs(cuesToSentences(parseSBV(normalized)), paragraphOptions);
       break;
     case "srt":
-      lines = sentencesToParagraphs(cuesToSentences(parseSRT(normalized)));
+      lines = sentencesToParagraphs(cuesToSentences(parseSRT(normalized)), paragraphOptions);
       break;
     default:
       lines = parsePlainText(normalized);
@@ -320,7 +324,7 @@ function parseSubtitleFile(rawText, filename) {
 
 // ===== 字幕清單 =====
 function loadSubtitles(fileName, rawText, { scroll = true, save = true } = {}) {
-  const subtitles = parseSubtitleFile(rawText, fileName);
+  const subtitles = parseSubtitleFile(rawText, fileName, paragraphOptions());
   if (subtitles.length === 0) {
     showToast(`${fileName} 裡找不到字幕內容，請換一個檔案。`, 6000);
     return false;
@@ -1008,6 +1012,69 @@ shortcutNameInput.addEventListener("change", () => {
   renderGeminiMode();
 });
 
+// ===== 分段設定：停頓幾秒換段、一段最多幾字 =====
+// 改了馬上用新設定重新分段（不重新下載），並存起來，下次開檔照用。
+// 重新分段後段落編號會變，「上次那一段」改用那段的第一句去新的段落裡找回來。
+const PARAGRAPH_GAP_SEC_RANGE = [0.5, 60];
+const PARAGRAPH_MAX_CHARS_RANGE = [20, 5000];
+
+function readParagraphSettings() {
+  const defaults = { gapSec: DEFAULT_PARAGRAPH_OPTIONS.gapMs / 1000, maxChars: DEFAULT_PARAGRAPH_OPTIONS.maxChars };
+  try {
+    const saved = JSON.parse(readSetting(PARAGRAPH_SETTINGS_KEY, "null"));
+    return {
+      gapSec: clampSetting(saved?.gapSec, PARAGRAPH_GAP_SEC_RANGE) ?? defaults.gapSec,
+      maxChars: clampSetting(saved?.maxChars, PARAGRAPH_MAX_CHARS_RANGE) ?? defaults.maxChars,
+    };
+  } catch (_error) {
+    return defaults;
+  }
+}
+
+// 不是數字（空白、打到一半）回傳 null，超出範圍就夾到範圍內
+function clampSetting(value, [min, max]) {
+  const n = Number(value);
+  if (value === "" || value == null || !Number.isFinite(n)) return null;
+  return Math.min(max, Math.max(min, n));
+}
+
+let paragraphSettings = readParagraphSettings();
+
+function paragraphOptions() {
+  return { gapMs: paragraphSettings.gapSec * 1000, maxChars: paragraphSettings.maxChars };
+}
+
+function renderParagraphSettings() {
+  paragraphGapInput.value = paragraphSettings.gapSec;
+  paragraphMaxInput.value = paragraphSettings.maxChars;
+  paragraphSummary.textContent = `分段設定：停頓 ${paragraphSettings.gapSec} 秒換段，一段最多 ${paragraphSettings.maxChars} 字`;
+}
+
+function applyParagraphSettings() {
+  const gapSec = clampSetting(paragraphGapInput.value, PARAGRAPH_GAP_SEC_RANGE);
+  const maxChars = clampSetting(paragraphMaxInput.value, PARAGRAPH_MAX_CHARS_RANGE);
+  if (gapSec == null || maxChars == null) return; // 打到一半，等打完
+  if (gapSec === paragraphSettings.gapSec && maxChars === paragraphSettings.maxChars) return;
+  paragraphSettings = { gapSec, maxChars };
+  writeSetting(PARAGRAPH_SETTINGS_KEY, JSON.stringify(paragraphSettings));
+  paragraphSummary.textContent = `分段設定：停頓 ${gapSec} 秒換段，一段最多 ${maxChars} 字`;
+  if (!currentFileName) return;
+
+  const lastRow = lineListEl.querySelector(".line-row.is-last");
+  const lastFirstLine = lastRow ? currentSubtitles[Number(lastRow.dataset.order) - 1]?.text.split("\n")[0] : null;
+  loadSubtitles(currentFileName, currentRawText, { scroll: false, save: false });
+  if (lastFirstLine) {
+    const found = currentSubtitles.find((sub) => sub.text.split("\n").includes(lastFirstLine));
+    if (found) markLastLine(found.order);
+  }
+}
+
+paragraphGapInput.addEventListener("input", applyParagraphSettings);
+paragraphMaxInput.addEventListener("input", applyParagraphSettings);
+// 離開輸入框時把超出範圍、或打到一半沒生效的值，改回實際在用的值
+paragraphGapInput.addEventListener("change", renderParagraphSettings);
+paragraphMaxInput.addEventListener("change", renderParagraphSettings);
+
 // 獨立成函式：自訂 scheme 不會讓這頁離開（字幕還在記憶體裡），測試也能換掉它
 function launchUrl(url) {
   window.location.href = url;
@@ -1095,6 +1162,7 @@ function restoreLastFile() {
 // ===== 啟動 =====
 renderJimakuKey();
 renderGeminiMode();
+renderParagraphSettings();
 restoreLastSearch();
 restoreLastFile();
 // 舊版（§28 初版）曾把所有打開過的字幕存在 IndexedDB 的 jst-library，現在用不到了，清掉釋放空間

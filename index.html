@@ -107,6 +107,19 @@
         </p>
       </details>
 
+      <details class="tools-details paragraph-settings">
+        <summary id="paragraphSummary">分段設定</summary>
+        <div class="paragraph-fields">
+          <label>停頓
+            <input type="number" id="paragraphGapInput" class="text-input number-input" min="0.5" max="60" step="0.5" inputmode="decimal">
+            秒以上就換一段</label>
+          <label>一段最多
+            <input type="number" id="paragraphMaxInput" class="text-input number-input" min="20" max="5000" step="10" inputmode="numeric">
+            字（超過就從段裡停頓最久的地方切開）</label>
+        </div>
+        <p class="cache-hint">改了馬上重新分段，設定會記住。只對有時間軸的字幕（.srt／.vtt／.sbv）有效。</p>
+      </details>
+
       <div class="actions">
         <button type="button" id="closeFileBtn" class="btn btn-text">關閉這個字幕</button>
       </div>
