@@ -487,10 +487,12 @@ function markSelectionAsLast() {
 selectionCopyBtn.addEventListener("click", () => {
   markSelectionAsLast();
   copyWithFeedback(selectionCopyBtn, selectedText());
+  clearSelection();
 });
 selectionGeminiBtn.addEventListener("click", () => {
   markSelectionAsLast();
   sendToGemini(selectedText(), `勾選的 ${selectedSentences.size} 句`);
+  clearSelection();
 });
 selectionClearBtn.addEventListener("click", clearSelection);
 
