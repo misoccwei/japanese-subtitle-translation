@@ -13,7 +13,7 @@ const GEMINI_WEB_URL = "https://gemini.google.com/app";
 const LAST_FILE_KEY = "jst_last_file_v1"; // 上次打開的字幕：{ name, text, line, savedAt }，只存這一個
 const GEMINI_MODE_KEY = "jst_gemini_mode_v1"; // "shortcut" | "web"
 const SHORTCUT_NAME_KEY = "jst_shortcut_name_v1";
-const PARAGRAPH_SETTINGS_KEY = "jst_paragraph_v1"; // 分段設定：{ gapSec, maxChars }
+const PARAGRAPH_SETTINGS_KEY = "jst_paragraph_v1"; // 分段設定：{ enabled, gapSec, maxChars }
 const DEFAULT_SHORTCUT_NAME = "Gemini解說日文";
 // iPadOS 的 Safari 預設回報成 Mac，要用觸控點數分辨
 const IS_IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
@@ -40,6 +40,11 @@ const currentFileTitle = document.getElementById("currentFileTitle");
 const lineCountText = document.getElementById("lineCountText");
 const closeFileBtn = document.getElementById("closeFileBtn");
 const lineListEl = document.getElementById("lineList");
+const selectionBar = document.getElementById("selectionBar");
+const selectionCount = document.getElementById("selectionCount");
+const selectionCopyBtn = document.getElementById("selectionCopyBtn");
+const selectionGeminiBtn = document.getElementById("selectionGeminiBtn");
+const selectionClearBtn = document.getElementById("selectionClearBtn");
 const toastEl = document.getElementById("toast");
 const geminiModeSummary = document.getElementById("geminiModeSummary");
 const geminiModeRadios = document.querySelectorAll('input[name="geminiMode"]');
@@ -47,10 +52,12 @@ const shortcutNameInput = document.getElementById("shortcutNameInput");
 const paragraphSummary = document.getElementById("paragraphSummary");
 const paragraphGapInput = document.getElementById("paragraphGapInput");
 const paragraphMaxInput = document.getElementById("paragraphMaxInput");
+const paragraphEnabledInput = document.getElementById("paragraphEnabledInput");
 
 // ===== 狀態 =====
 let currentFileName = "";
-let currentSubtitles = []; // { order, text }[]：一段一筆，段落裡的句子用換行分開
+let currentSubtitles = []; // { order, text, lines, firstIdx }[]：一段一筆；text 是 lines 用換行接起來，firstIdx 是第一句在整份字幕的句子編號
+const selectedSentences = new Set(); // 勾選的句子（整份字幕的句子編號）。重新分段不會改變句子，所以勾選可以留著
 let currentRawText = ""; // 目前打開的字幕原文，記錄「上次看到哪一段」時要連同內容一起存
 
 // ===== 純函式工具 =====
@@ -250,8 +257,8 @@ function cuesToSentences(cues) {
 // 停頓超過 gapMs 就換一段（講話中間幾乎不會停這麼久，通常是換場景）。
 // 但吵架、連珠炮的場景可以好幾分鐘都沒停頓，一段會長到幾千字（實測一集 Netflix 時代劇最長 2641 字），
 // 所以超過 maxChars 的段，再從段裡停頓最久的地方切開，切到每段都在上限內（或只剩一句）。
-// 兩個值使用者可以在「分段設定」調整（見下面的 paragraphSettings），這裡是預設值。
-const DEFAULT_PARAGRAPH_OPTIONS = { gapMs: 2000, maxChars: 200 };
+// 兩個值使用者可以在「分段設定」調整，也可以整個關掉變回一句一列（見下面的 paragraphSettings），這裡是預設值。
+const DEFAULT_PARAGRAPH_OPTIONS = { enabled: true, gapMs: 2000, maxChars: 200 };
 
 function sentenceGap(a, b) {
   return a.end != null && b.start != null ? b.start - a.end : 0;
@@ -267,14 +274,15 @@ function splitLongParagraph(sentences, maxChars) {
   return [...splitLongParagraph(sentences.slice(0, cut), maxChars), ...splitLongParagraph(sentences.slice(cut), maxChars)];
 }
 
-function sentencesToParagraphs(sentences, { gapMs, maxChars } = DEFAULT_PARAGRAPH_OPTIONS) {
+function sentencesToParagraphs(sentences, { enabled = true, gapMs, maxChars } = DEFAULT_PARAGRAPH_OPTIONS) {
+  if (!enabled) return sentences.map((s) => [s.text]);
   const groups = [];
   for (const sentence of sentences) {
     const group = groups[groups.length - 1];
     if (group && sentenceGap(group[group.length - 1], sentence) < gapMs) group.push(sentence);
     else groups.push([sentence]);
   }
-  return groups.flatMap((group) => splitLongParagraph(group, maxChars)).map((group) => group.map((s) => s.text).join("\n"));
+  return groups.flatMap((group) => splitLongParagraph(group, maxChars)).map((group) => group.map((s) => s.text));
 }
 
 function parsePlainText(text) {
@@ -306,7 +314,7 @@ function parseSubtitleFile(rawText, filename, paragraphOptions = DEFAULT_PARAGRA
       lines = sentencesToParagraphs(cuesToSentences(parseVTT(normalized)), paragraphOptions);
       break;
     case "ass":
-      lines = parseASS(normalized);
+      lines = parseASS(normalized).map((line) => [line]);
       break;
     case "sbv":
       lines = sentencesToParagraphs(cuesToSentences(parseSBV(normalized)), paragraphOptions);
@@ -315,11 +323,12 @@ function parseSubtitleFile(rawText, filename, paragraphOptions = DEFAULT_PARAGRA
       lines = sentencesToParagraphs(cuesToSentences(parseSRT(normalized)), paragraphOptions);
       break;
     default:
-      lines = parsePlainText(normalized);
+      lines = parsePlainText(normalized).map((line) => [line]);
       break;
   }
 
-  return lines.map((text, i) => ({ order: i + 1, text }));
+  // lines：一段一個陣列，陣列裡是這段的句子
+  return lines.map((sentences, i) => ({ order: i + 1, text: sentences.join("\n"), lines: sentences }));
 }
 
 // ===== 字幕清單 =====
@@ -329,13 +338,25 @@ function loadSubtitles(fileName, rawText, { scroll = true, save = true } = {}) {
     showToast(`${fileName} 裡找不到字幕內容，請換一個檔案。`, 6000);
     return false;
   }
+  let idx = 0;
+  for (const sub of subtitles) {
+    sub.firstIdx = idx;
+    idx += sub.lines.length;
+  }
+  // 換了檔案才清掉勾選；同一個檔重新分段，句子不變，勾選留著
+  if (fileName !== currentFileName || rawText !== currentRawText) selectedSentences.clear();
   currentFileName = fileName;
   currentSubtitles = subtitles;
   currentRawText = rawText;
   if (save) saveLastFile(null);
   currentFileTitle.textContent = fileName;
-  lineCountText.textContent = `共 ${subtitles.length} 段。📋 複製這段，「Gemini」把這段送去 Gemini 解說。`;
+  // 分段關掉時一列就是一句（沒時間軸的格式也一樣），用詞跟著換
+  const unit = subtitles.every((sub) => sub.lines.length === 1) ? "句" : "段";
+  lineCountText.textContent = unit === "段"
+    ? `共 ${subtitles.length} 段。📋 複製這段，「Gemini」把這段送去 Gemini 解說；點句子可以勾選幾句（點段落編號整段勾選），合在一起複製或送出。`
+    : `共 ${subtitles.length} 句。📋 複製這句，「Gemini」把這句送去 Gemini 解說；點句子可以勾選幾句，合在一起複製或送出。`;
   renderLineList();
+  renderSelectionBar();
   subtitlePanel.hidden = false;
   if (scroll) subtitlePanel.scrollIntoView({ behavior: "smooth", block: "start" });
   return true;
@@ -348,15 +369,19 @@ function renderLineList() {
     li.className = "line-row";
     li.dataset.order = String(sub.order);
     // 整段都是音效、符號這類句子就淡化顯示（判斷規則見 shouldSkipLine），但按鈕照樣可以用
-    if (sub.text.split("\n").every(shouldSkipLine)) li.classList.add("is-minor");
+    if (sub.lines.every(shouldSkipLine)) li.classList.add("is-minor");
+    const sentences = sub.lines
+      .map((line, i) => `<span class="line-sentence" data-idx="${sub.firstIdx + i}" role="checkbox" aria-checked="false" tabindex="0">${escapeHtml(line)}</span>`)
+      .join("");
     li.innerHTML = `
-      <span class="line-order">${sub.order}</span>
-      <span class="line-ja">${escapeHtml(sub.text)}</span>
+      <button type="button" class="line-order" title="勾選／取消整段" aria-label="勾選第 ${sub.order} 段全部句子" aria-pressed="false">${sub.order}</button>
+      <span class="line-ja">${sentences}</span>
       <span class="line-actions">
         <button type="button" class="line-copy" title="複製這段" aria-label="複製第 ${sub.order} 段">📋</button>
         <button type="button" class="line-gemini" title="用 Gemini 解說這段" aria-label="用 Gemini 解說第 ${sub.order} 段">Gemini</button>
       </span>
     `;
+    refreshSelectionMarks(li);
     frag.appendChild(li);
   });
   lineListEl.replaceChildren(frag);
@@ -365,6 +390,16 @@ function renderLineList() {
 lineListEl.addEventListener("click", (event) => {
   const row = event.target.closest(".line-row");
   if (!row) return;
+  if (event.target.closest(".line-order")) {
+    toggleParagraph(row);
+    return;
+  }
+  const sentence = event.target.closest(".line-sentence");
+  // 拖曳選取文字（想自己複製一小段）時不要順便勾選
+  if (sentence && window.getSelection()?.isCollapsed !== false) {
+    toggleSentence(sentence);
+    return;
+  }
   const order = Number(row.dataset.order);
   const copyBtn = event.target.closest(".line-copy");
   const geminiBtn = event.target.closest(".line-gemini");
@@ -374,10 +409,80 @@ lineListEl.addEventListener("click", (event) => {
   else askGemini(order);
 });
 
+lineListEl.addEventListener("keydown", (event) => {
+  const sentence = event.target.closest(".line-sentence");
+  if (!sentence || (event.key !== " " && event.key !== "Enter")) return;
+  event.preventDefault();
+  toggleSentence(sentence);
+});
+
+// ===== 勾選幾句，合在一起複製／送 Gemini =====
+// 點句子切換勾選；點段落編號整段一起勾（整段都勾了就整段取消）。畫面底部出現操作列。
+// 合起來的順序照字幕順序（不是勾選順序），一句一行。
+function toggleSentence(el) {
+  const idx = Number(el.dataset.idx);
+  if (selectedSentences.has(idx)) selectedSentences.delete(idx);
+  else selectedSentences.add(idx);
+  refreshSelectionMarks(el.closest(".line-row"));
+  renderSelectionBar();
+}
+
+function toggleParagraph(row) {
+  const sub = currentSubtitles[Number(row.dataset.order) - 1];
+  if (!sub) return;
+  const indices = sub.lines.map((_line, i) => sub.firstIdx + i);
+  const allSelected = indices.every((idx) => selectedSentences.has(idx));
+  indices.forEach((idx) => (allSelected ? selectedSentences.delete(idx) : selectedSentences.add(idx)));
+  refreshSelectionMarks(row);
+  renderSelectionBar();
+}
+
+// 依 selectedSentences 更新這一段的句子底色，以及段落編號的「全選／部分選」標示
+function refreshSelectionMarks(row) {
+  const sentences = row.querySelectorAll(".line-sentence");
+  let count = 0;
+  sentences.forEach((el) => {
+    const selected = selectedSentences.has(Number(el.dataset.idx));
+    el.classList.toggle("is-selected", selected);
+    el.setAttribute("aria-checked", String(selected));
+    if (selected) count++;
+  });
+  const orderBtn = row.querySelector(".line-order");
+  const all = count > 0 && count === sentences.length;
+  orderBtn.classList.toggle("is-all", all);
+  orderBtn.classList.toggle("is-some", count > 0 && !all);
+  orderBtn.setAttribute("aria-pressed", String(all));
+}
+
+function selectedText() {
+  return currentSubtitles
+    .flatMap((sub) => sub.lines.filter((_line, i) => selectedSentences.has(sub.firstIdx + i)))
+    .join("\n");
+}
+
+function renderSelectionBar() {
+  const count = selectedSentences.size;
+  selectionBar.hidden = count === 0;
+  document.body.classList.toggle("has-selection", count > 0);
+  selectionCount.textContent = `已勾選 ${count} 句`;
+}
+
+function clearSelection() {
+  selectedSentences.clear();
+  const rows = new Set([...lineListEl.querySelectorAll(".line-sentence.is-selected")].map((el) => el.closest(".line-row")));
+  rows.forEach(refreshSelectionMarks);
+  renderSelectionBar();
+}
+
+selectionCopyBtn.addEventListener("click", () => copyWithFeedback(selectionCopyBtn, selectedText()));
+selectionGeminiBtn.addEventListener("click", () => sendToGemini(selectedText(), `勾選的 ${selectedSentences.size} 句`));
+selectionClearBtn.addEventListener("click", clearSelection);
+
 closeFileBtn.addEventListener("click", () => {
   currentFileName = "";
   currentSubtitles = [];
   currentRawText = "";
+  clearSelection();
   clearLastFile();
   lineListEl.replaceChildren();
   subtitlePanel.hidden = true;
@@ -1013,67 +1118,128 @@ shortcutNameInput.addEventListener("change", () => {
 });
 
 // ===== 分段設定：停頓幾秒換段、一段最多幾字 =====
-// 改了馬上用新設定重新分段（不重新下載），並存起來，下次開檔照用。
-// 重新分段後段落編號會變，「上次那一段」改用那段的第一句去新的段落裡找回來。
+// 改了就用新設定重新分段（不重新下載），並存起來，下次開檔照用。
+// 重新分段後段落編號會變，「上次那一段」改用那段第一句的句子編號，去新的段落裡找回來（句子編號不受分段影響）。
+// iPhone 上的坑（所以輸入框用 type="text" + inputmode，不用 type="number"）：
+// - 手機習慣用倒退鍵清掉再打，清「200」的途中會經過「20」「2」。舊版每打一個字就套用並存檔，夾到範圍內，
+//   結果上限被改成 20，離開輸入框也回不去；每打一個字就重畫上千列，手機也會卡。
+//   現在打字途中只在「停手一下、而且值在範圍內」才套用；離開輸入框或按 Enter 才把超出範圍的值夾回範圍內、正式定案
+// - 中文鍵盤可能打出全形數字「５」或「，」，type="number" 會把它當成空值，等於永遠套用不了，所以自己轉成半形
 const PARAGRAPH_GAP_SEC_RANGE = [0.5, 60];
 const PARAGRAPH_MAX_CHARS_RANGE = [20, 5000];
+const PARAGRAPH_INPUT_DEBOUNCE_MS = 600;
 
 function readParagraphSettings() {
-  const defaults = { gapSec: DEFAULT_PARAGRAPH_OPTIONS.gapMs / 1000, maxChars: DEFAULT_PARAGRAPH_OPTIONS.maxChars };
+  const defaults = { enabled: true, gapSec: DEFAULT_PARAGRAPH_OPTIONS.gapMs / 1000, maxChars: DEFAULT_PARAGRAPH_OPTIONS.maxChars };
   try {
     const saved = JSON.parse(readSetting(PARAGRAPH_SETTINGS_KEY, "null"));
+    const gapSec = Number(saved?.gapSec);
+    const maxChars = Number(saved?.maxChars);
     return {
-      gapSec: clampSetting(saved?.gapSec, PARAGRAPH_GAP_SEC_RANGE) ?? defaults.gapSec,
-      maxChars: clampSetting(saved?.maxChars, PARAGRAPH_MAX_CHARS_RANGE) ?? defaults.maxChars,
+      enabled: saved?.enabled !== false,
+      gapSec: Number.isFinite(gapSec) ? clampToRange(gapSec, PARAGRAPH_GAP_SEC_RANGE) : defaults.gapSec,
+      maxChars: Number.isFinite(maxChars) ? clampToRange(Math.round(maxChars), PARAGRAPH_MAX_CHARS_RANGE) : defaults.maxChars,
     };
   } catch (_error) {
     return defaults;
   }
 }
 
-// 不是數字（空白、打到一半）回傳 null，超出範圍就夾到範圍內
-function clampSetting(value, [min, max]) {
-  const n = Number(value);
-  if (value === "" || value == null || !Number.isFinite(n)) return null;
+function clampToRange(n, [min, max]) {
   return Math.min(max, Math.max(min, n));
 }
 
+// 輸入框的字 → 數字：全形數字、全形句點、逗號都接受；空白或打到一半（「1.」以外的怪字）回傳 null
+function parseSettingInput(str) {
+  const text = String(str || "")
+    .replace(/[０-９]/g, (d) => String.fromCharCode(d.charCodeAt(0) - 0xfee0))
+    .replace(/[．。，,]/g, ".")
+    .trim();
+  if (!/^\d+(\.\d*)?$|^\.\d+$/.test(text)) return null;
+  return Number(text);
+}
+
 let paragraphSettings = readParagraphSettings();
+let paragraphInputTimer = null;
 
 function paragraphOptions() {
-  return { gapMs: paragraphSettings.gapSec * 1000, maxChars: paragraphSettings.maxChars };
+  return { enabled: paragraphSettings.enabled, gapMs: paragraphSettings.gapSec * 1000, maxChars: paragraphSettings.maxChars };
+}
+
+function renderParagraphSummary() {
+  const { enabled, gapSec, maxChars } = paragraphSettings;
+  paragraphSummary.textContent = enabled
+    ? `分段設定：停頓 ${gapSec} 秒換段，一段最多 ${maxChars} 字`
+    : "分段設定：關閉（一句一列）";
 }
 
 function renderParagraphSettings() {
+  paragraphEnabledInput.checked = paragraphSettings.enabled;
   paragraphGapInput.value = paragraphSettings.gapSec;
   paragraphMaxInput.value = paragraphSettings.maxChars;
-  paragraphSummary.textContent = `分段設定：停頓 ${paragraphSettings.gapSec} 秒換段，一段最多 ${paragraphSettings.maxChars} 字`;
+  paragraphGapInput.disabled = !paragraphSettings.enabled;
+  paragraphMaxInput.disabled = !paragraphSettings.enabled;
+  renderParagraphSummary();
 }
 
-function applyParagraphSettings() {
-  const gapSec = clampSetting(paragraphGapInput.value, PARAGRAPH_GAP_SEC_RANGE);
-  const maxChars = clampSetting(paragraphMaxInput.value, PARAGRAPH_MAX_CHARS_RANGE);
-  if (gapSec == null || maxChars == null) return; // 打到一半，等打完
-  if (gapSec === paragraphSettings.gapSec && maxChars === paragraphSettings.maxChars) return;
-  paragraphSettings = { gapSec, maxChars };
+function saveParagraphSettings() {
   writeSetting(PARAGRAPH_SETTINGS_KEY, JSON.stringify(paragraphSettings));
-  paragraphSummary.textContent = `分段設定：停頓 ${gapSec} 秒換段，一段最多 ${maxChars} 字`;
-  if (!currentFileName) return;
+}
 
+// 用目前的分段設定重新分段打開中的字幕
+function resplitCurrentFile() {
+  if (!currentFileName) return;
   const lastRow = lineListEl.querySelector(".line-row.is-last");
-  const lastFirstLine = lastRow ? currentSubtitles[Number(lastRow.dataset.order) - 1]?.text.split("\n")[0] : null;
+  const lastIdx = lastRow ? currentSubtitles[Number(lastRow.dataset.order) - 1]?.firstIdx : null;
   loadSubtitles(currentFileName, currentRawText, { scroll: false, save: false });
-  if (lastFirstLine) {
-    const found = currentSubtitles.find((sub) => sub.text.split("\n").includes(lastFirstLine));
+  if (lastIdx != null) {
+    const found = currentSubtitles.find((sub) => lastIdx >= sub.firstIdx && lastIdx < sub.firstIdx + sub.lines.length);
     if (found) markLastLine(found.order);
   }
 }
 
-paragraphGapInput.addEventListener("input", applyParagraphSettings);
-paragraphMaxInput.addEventListener("input", applyParagraphSettings);
-// 離開輸入框時把超出範圍、或打到一半沒生效的值，改回實際在用的值
-paragraphGapInput.addEventListener("change", renderParagraphSettings);
-paragraphMaxInput.addEventListener("change", renderParagraphSettings);
+// final=false：打字途中，值不完整或超出範圍就先不動；final=true：定案，空白的改回原值、超出範圍的夾回範圍內
+function applyParagraphSettings({ final }) {
+  clearTimeout(paragraphInputTimer);
+  let gapSec = parseSettingInput(paragraphGapInput.value);
+  let maxChars = parseSettingInput(paragraphMaxInput.value);
+  if (maxChars != null) maxChars = Math.round(maxChars);
+  const inRange = (n, [min, max]) => n != null && n >= min && n <= max;
+  if (final) {
+    gapSec = gapSec == null ? paragraphSettings.gapSec : clampToRange(gapSec, PARAGRAPH_GAP_SEC_RANGE);
+    maxChars = maxChars == null ? paragraphSettings.maxChars : clampToRange(maxChars, PARAGRAPH_MAX_CHARS_RANGE);
+  } else if (!inRange(gapSec, PARAGRAPH_GAP_SEC_RANGE) || !inRange(maxChars, PARAGRAPH_MAX_CHARS_RANGE)) {
+    return;
+  }
+  const changed = gapSec !== paragraphSettings.gapSec || maxChars !== paragraphSettings.maxChars;
+  paragraphSettings = { ...paragraphSettings, gapSec, maxChars };
+  if (final) renderParagraphSettings();
+  if (!changed) return;
+  saveParagraphSettings();
+  renderParagraphSummary();
+  resplitCurrentFile();
+}
+
+// 關掉分段：每句一列（句子還是照樣重組，只是不合併成段）。秒數、字數保留，打開時照用
+paragraphEnabledInput.addEventListener("change", () => {
+  paragraphSettings = { ...paragraphSettings, enabled: paragraphEnabledInput.checked };
+  saveParagraphSettings();
+  renderParagraphSettings();
+  resplitCurrentFile();
+});
+
+for (const input of [paragraphGapInput, paragraphMaxInput]) {
+  input.addEventListener("input", () => {
+    clearTimeout(paragraphInputTimer);
+    paragraphInputTimer = setTimeout(() => applyParagraphSettings({ final: false }), PARAGRAPH_INPUT_DEBOUNCE_MS);
+  });
+  // 離開輸入框（iPhone 數字鍵盤沒有 Enter，點旁邊或按「完成」）就定案
+  input.addEventListener("change", () => applyParagraphSettings({ final: true }));
+  input.addEventListener("blur", () => applyParagraphSettings({ final: true }));
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") input.blur();
+  });
+}
 
 // 獨立成函式：自訂 scheme 不會讓這頁離開（字幕還在記憶體裡），測試也能換掉它
 function launchUrl(url) {
@@ -1082,33 +1248,38 @@ function launchUrl(url) {
 
 function askGemini(order) {
   const sub = currentSubtitles[order - 1];
-  if (!sub) return;
+  if (sub) sendToGemini(sub.text, `第 ${order} 段`);
+}
+
+// label 只用在提示訊息裡，例如「第 3 段」「勾選的 4 句」
+function sendToGemini(text, label) {
+  if (!text) return;
 
   // 捷徑模式只傳日文原句：使用者的捷徑／Gemini 已經有個人化設定，知道要怎麼解說。
   // 也先複製同一段，捷徑沒收到輸入時會改讀剪貼簿
   if (geminiMode === "shortcut") {
-    copyText(sub.text);
-    launchUrl(`shortcuts://run-shortcut?name=${encodeURIComponent(shortcutName)}&input=text&text=${encodeURIComponent(sub.text)}`);
+    copyText(text);
+    launchUrl(`shortcuts://run-shortcut?name=${encodeURIComponent(shortcutName)}&input=text&text=${encodeURIComponent(text)}`);
     showToast(`用捷徑「${shortcutName}」開 Gemini…（Safari 問要不要打開「捷徑」時按「打開」）`, 6000);
     return;
   }
 
   // 網頁版：「解說日文：」＋原句，對應使用者在 Gemini 設好的個人化設定
-  const copied = copyText(`${GEMINI_WEB_PREFIX}${sub.text}`);
+  const copied = copyText(`${GEMINI_WEB_PREFIX}${text}`);
 
   const win = window.open(GEMINI_WEB_URL, "_blank");
   if (win) win.opener = null; // 不讓 Gemini 那邊拿到這個分頁
   copied.then((ok) => {
     if (!ok) {
-      showToast("瀏覽器不讓自動複製。請先按 📋 複製這段，到 Gemini 輸入「解說日文：」後貼上。", 8000);
+      showToast("瀏覽器不讓自動複製。請先按 📋 複製，到 Gemini 輸入「解說日文：」後貼上。", 8000);
     } else if (!win) {
       showToast("已複製，但新分頁被擋掉了：請自己打開 Gemini，在輸入框貼上送出。", 8000);
     } else {
       // 手機、平板沒有滑鼠：有裝 Gemini App 的話系統會直接用 App 開，貼上要長按輸入框
       const touch = window.matchMedia?.("(hover: none)").matches;
       showToast(touch
-        ? `已複製「解說日文：第 ${order} 段」。在 Gemini 輸入框長按 →「貼上」→ 送出。`
-        : `已複製「解說日文：第 ${order} 段」。在 Gemini 輸入框按 Ctrl/⌘+V 貼上、送出。`);
+        ? `已複製「解說日文：${label}」。在 Gemini 輸入框長按 →「貼上」→ 送出。`
+        : `已複製「解說日文：${label}」。在 Gemini 輸入框按 Ctrl/⌘+V 貼上、送出。`);
     }
   });
 }

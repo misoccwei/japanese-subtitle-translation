@@ -293,23 +293,70 @@ main {
   background: #f8fafc;
 }
 
+/* 段落編號也是「整段勾選」按鈕：全選實心、部分選外框 */
 .line-order {
   flex: 0 0 auto;
+  align-self: flex-start;
   min-width: 2.6em;
+  margin-top: 2px;
+  padding: 2px 4px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
   text-align: right;
   font-size: 0.78rem;
   color: var(--text-muted);
   font-family: "SFMono-Regular", Menlo, Consolas, monospace;
+  cursor: pointer;
 }
 
-/* 一列是一段，段落裡的句子用換行分開（pre-line 保留換行） */
+/* 觸控裝置點完會一直停在 hover，所以只在有滑鼠時顯示 */
+@media (hover: hover) {
+  .line-order:hover {
+    border-color: #f59e0b;
+  }
+}
+
+.line-order.is-some {
+  border-color: #f59e0b;
+  color: #b45309;
+}
+
+.line-order.is-all {
+  border-color: #f59e0b;
+  background: #f59e0b;
+  color: #fff;
+}
+
+/* 一列是一段，段落裡一句一行；點句子可以勾選 */
 .line-ja {
   flex: 1 1 auto;
   min-width: 0;
   font-size: 0.98rem;
   line-height: 1.7;
-  white-space: pre-line;
   overflow-wrap: anywhere;
+}
+
+.line-sentence {
+  display: block;
+  margin: 0 -4px;
+  padding: 0 4px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.line-sentence:hover {
+  background: #f1f5f9;
+}
+
+.line-sentence.is-selected {
+  background: #fef3c7;
+  box-shadow: inset 3px 0 0 #f59e0b;
+}
+
+.line-sentence:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
 }
 
 /* 音效、符號這類句子（shouldSkipLine）淡化，按鈕照樣能用 */
@@ -372,6 +419,10 @@ main {
 }
 
 @media (hover: none) {
+  .line-order {
+    min-height: 32px;
+  }
+
   .line-copy,
   .line-gemini {
     opacity: 1;
@@ -466,6 +517,49 @@ main {
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
 }
 
+/* 有勾選時底部有操作列，提示訊息往上讓開 */
+body.has-selection .toast {
+  bottom: 84px;
+}
+
+/* ===== 勾選句子的操作列 ===== */
+/* 操作列蓋住的高度，讓最後一段捲得出來 */
+body.has-selection {
+  padding-bottom: 100px;
+}
+
+.selection-bar {
+  position: fixed;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  z-index: 900;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: max-content;
+  max-width: calc(100vw - 32px);
+  padding: 8px 10px 8px 16px;
+  border-radius: 12px;
+  background: #fff;
+  border: 1px solid var(--border);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15);
+}
+
+.selection-bar[hidden] {
+  display: none;
+}
+
+.selection-count {
+  font-size: 0.9rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.selection-bar .btn {
+  white-space: nowrap;
+}
+
 .toast[hidden] {
   display: none;
 }
@@ -487,6 +581,23 @@ main {
   gap: 8px;
   margin-bottom: 6px;
   font-size: 0.92rem;
+}
+
+.paragraph-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.paragraph-toggle input {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+}
+
+.number-input:disabled {
+  opacity: 0.5;
 }
 
 /* 16px 以上，iOS Safari 點進去才不會自動放大 */

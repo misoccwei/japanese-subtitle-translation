@@ -110,14 +110,17 @@
       <details class="tools-details paragraph-settings">
         <summary id="paragraphSummary">分段設定</summary>
         <div class="paragraph-fields">
+          <label class="paragraph-toggle">
+            <input type="checkbox" id="paragraphEnabledInput">
+            依停頓把句子合成段落（關掉就一句一列）</label>
           <label>停頓
-            <input type="number" id="paragraphGapInput" class="text-input number-input" min="0.5" max="60" step="0.5" inputmode="decimal">
+            <input type="text" id="paragraphGapInput" class="text-input number-input" inputmode="decimal" enterkeyhint="done" autocomplete="off" aria-label="停頓幾秒換段（0.5～60）">
             秒以上就換一段</label>
           <label>一段最多
-            <input type="number" id="paragraphMaxInput" class="text-input number-input" min="20" max="5000" step="10" inputmode="numeric">
+            <input type="text" id="paragraphMaxInput" class="text-input number-input" inputmode="numeric" enterkeyhint="done" autocomplete="off" aria-label="一段最多幾字（20～5000）">
             字（超過就從段裡停頓最久的地方切開）</label>
         </div>
-        <p class="cache-hint">改了馬上重新分段，設定會記住。只對有時間軸的字幕（.srt／.vtt／.sbv）有效。</p>
+        <p class="cache-hint">打完停一下或離開輸入框就重新分段，設定會記住。停頓 0.5～60 秒、一段 20～5000 字。只對有時間軸的字幕（.srt／.vtt／.sbv）有效。</p>
       </details>
 
       <div class="actions">
@@ -126,6 +129,13 @@
       <ol id="lineList" class="line-list"></ol>
     </section>
   </main>
+
+  <div id="selectionBar" class="selection-bar" role="region" aria-label="勾選的句子" hidden>
+    <span id="selectionCount" class="selection-count"></span>
+    <button type="button" id="selectionCopyBtn" class="btn btn-secondary btn-small">📋 複製</button>
+    <button type="button" id="selectionGeminiBtn" class="btn btn-primary btn-small">Gemini</button>
+    <button type="button" id="selectionClearBtn" class="btn btn-text btn-small">清除</button>
+  </div>
 
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
